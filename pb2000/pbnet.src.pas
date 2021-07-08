@@ -1,3 +1,7 @@
+{ Copyright (c) 2021, Wojciech Owczarek }
+{ All rights reserved }
+{ BSD 2-clause licence - see LICENSE in the top directory }
+
 {$D-}
 {$DEFINE PBNET_GUI}
 {$UNDEF PBNET_GUI}

@@ -1,3 +1,7 @@
+; Copyright (c) 2021, Wojciech Owczarek
+; All rights reserved.
+; BSD 2-clause licence - see LICENSE in the top directory
+
 ; base/org are meaningless in inline code, but keep the compiler happy
 BASE: EQU &H7000
 START here

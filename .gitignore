@@ -42,6 +42,9 @@
 *.idb
 *.pdb
 
+# ASM listings
+*.lst
+
 # Kernel Module Compile Results
 *.mod*
 *.cmd
@@ -51,9 +54,15 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-# Binaries
+# Compiled ASM sources
+enc_bl.pas
+dec_bl.pas
+cksum.pas
+
+# Binaries + compiled sources
 pbnet
 hd61700
+pbnet.pas
 
 # scrap
 .scrap
