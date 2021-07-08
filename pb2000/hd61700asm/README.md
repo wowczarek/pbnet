@@ -6,4 +6,4 @@ The following necessary modifications have been made:
 	- Added support for DL-Pascal's inline() output (/s flag)
 	- Reset return code to 0 if EOF error is returned (which it usually is), to keep make from barfing out
 
-Otherwise no modifications to the core operation have been made and the original readme files are included.
+Otherwise, no modifications to the core operation of the compiler have been made and the original readme files are included.
