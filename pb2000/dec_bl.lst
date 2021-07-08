@@ -1,0 +1,67 @@
+HD61700 ASSEMBLER Rev 0.43 - ASSEMBLY LIST OF [dec_bl.asm]
+00001:0000            ; base/org are meaningless in inline code, but keep the compiler happy
+00002:0000            BASE:        EQU     &H7000
+00003:0000                         START   here
+00004:7000                         ORG     BASE
+00005:7000            here:        
+00006:7000            ; $0..$1 = pkt, $2..$3 = wbuf, $4..$5 = pos, $6 = len
+00007:7000  E800C0                 ldm     $0,(IX+$31),7         ; load first 4 parameters into $0...$6
+00008:7003            ; we are done with IX for now, store it until near exit
+00009:7003  9E12                   gre     IX,$18                ; save IX
+00010:7005            
+00011:7005  886004                 adw     $0,$4                 ; add offset (pos) to packet address
+00012:7008  9640                   pre     IZ,$0                 ; put packet data address into IZ, pkt
+00013:700A  9602                   pre     IX,$2                 ; put buffer address into IX, wbuf
+00014:700C            
+00015:700C  EA0860                 ldim    $8,(IX+$31),4         ; $8...$11 = sub1...sub4; wbuf+=4
+00016:700F  076809                 xrc     $8,$9                 ; if sub1=sub2
+00017:7012  B412                   jr      nz,copyloop           ; else continue
+00018:7014            ; block copy, no replacements
+00019:7014  826A02                 ldw     $10,$2                ; $10 = wbuf
+00020:7017  0F6707                 xr      $7,$7                 ; $7 = 0
+00021:701A  886A06                 adw     $10,$6                ; $10 = wbuf+len
+00022:701D  962A                   pre     IY,$10                ; iy (block end) = wbuf + len
+00023:701F  D8                     bup                           ; copy the block
+00024:7020  B72F                   jr      done                  ; the end
+00025:7022            
+00026:7022  490604                 sb      $6,4                  ; len -= 4;
+00027:7025            copyloop:    
+00028:7025  2A0C                   ldi     $12,(IX+$31)          ; c = buf++
+00029:7027            sub1:        
+00030:7027  076C08                 xrc     $12,$8                ; if c = sub1
+00031:702A  B405                   jr      nz,sub2
+00032:702C  428C001B               ld      $12,0,jr bytedone     ; then c = 0
+00033:7030            sub2:        
+00034:7030  076C09                 xrc     $12,$9                ; if c = sub2
+00035:7033  B405                   jr      nz,sub3
+00036:7035  428C0112               ld      $12,1,jr bytedone     ; then c = 1
+00037:7039            sub3:        
+00038:7039  076C0A                 xrc     $12,$10               ; if c = sub3
+00039:703C  B405                   jr      nz,sub4
+00040:703E  428C0209               ld      $12,2,jr bytedone     ; then c = 2
+00041:7042            sub4:        
+00042:7042  076C0B                 xrc     $12,$11               ; if c = sub4
+00043:7045  B404                   jr      nz,bytedone
+00044:7047  420C03                 ld      $12,3                 ; then c = 3
+00045:704A            bytedone:    
+00046:704A  230C                   sti     $12,(IZ+$31)          ; *pkt++ = c
+00047:704C  0926                   sb      $6,$30                ; len--
+00048:704E  B4AA                   jr      nz,copyloop           ;
+00049:7050            done:        
+00050:7050  9612                   pre     IX,$18                ; restore IX
+00051:7052            
+
+ASSEMBLY COMPLETE, NO ERRORS FOUND
+
+HD61700 ASSEMBLER Rev 0.43 - MAP LIST OF [dec_bl.asm]
+ LABEL           : ADDRESS(hex)  | LABEL           : ADDRESS(hex)
+-------------------------------------------------------------------
+ BASE            :   7000h     A | here            :   7000h      A
+ copyloop        :   7025h     A | sub1            :   7027h      A
+ sub2            :   7030h     A | sub3            :   7039h      A
+ sub4            :   7042h     A | bytedone        :   704Ah      A
+ done            :   7050h     A |
+
+ START ADDRESS   = 7000h
+ END ADDRESS     = 7051h
+ EXECUTE ADDRESS = 7000h

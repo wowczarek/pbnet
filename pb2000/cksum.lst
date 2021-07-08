@@ -1,0 +1,53 @@
+HD61700 ASSEMBLER Rev 0.43 - ASSEMBLY LIST OF [cksum.asm]
+00001:0000            ; base/org are meaningless in inline code, but keep the compiler happy
+00002:0000            BASE:        EQU     &H7000
+00003:0000                         START   here
+00004:7000                         ORG     BASE
+00005:7000            here:        
+00006:7000  E800A0                 ldm     $0,(IX+$31),6         ; load all three params into $0..$5
+00007:7003            ; data: $0..$1, offset: $2..$3, len: $4..$5
+00008:7003  886002                 adw     $0,$2                 ; add offset to address
+00009:7006  9640                   pre     IZ,$0                 ; put the result into IZ (starting address)
+00010:7008  D1020200               ldw     $2,2                  ; constant = 2
+00011:700C  8F6606                 xrw     $6,$6                 ; zeroize $6 = sum
+00012:700F            loop:        
+00013:700F  816402                 sbcw    $4,$2                 ; check if len > 1
+00014:7012  B511                   jr      c,lastbyte            ; carry = len <=1, no loop
+00015:7014  AB08                   ldiw    $8,(IZ+$31)           ; next word into $8, pos increments by 2
+00016:7016  886608                 adw     $6,$8                 ; sum up
+00017:7019  B105                   jr      nc,nofold             ; no carry = continue
+00018:701B            fold:        
+00019:701B  8826                   adw     $6,$30                ; carry? add 1
+00020:701D  B583                   jr      c,fold                ; still carry? fold again
+00021:701F            nofold:      
+00022:701F  896402                 sbw     $4,$2                 ; decrement len by 2
+00023:7022  B794                   jr      loop                  ; back to beginning
+00024:7024            lastbyte:    
+00025:7024  8124                   sbcw    $4,$30                ; len = 1?
+00026:7026  B40F                   jr      nz,end                ; no
+00027:7028  2908                   ld      $8,(IZ+$31)           ; last byte into $8:hi
+00028:702A  0F6909                 xr      $9,$9                 ; zero into $8:lo
+00029:702D  886608                 adw     $6,$8                 ; add last byte
+00030:7030  B105                   jr      nc,end                ; no carry = done
+00031:7032            fold2:       
+00032:7032  8826                   adw     $6,$30                ; carry ? add 1
+00033:7034  B583                   jr      c,fold2               ; still carry? fold again
+00034:7036            end:         
+00035:7036  9B46                   invw    $6                    ; invert
+00036:7038  420A04                 ld      $10,4
+00037:703B  A0E60A                 stw     $6,(IX-$10)           ; result! (IX-4)
+00038:703E            
+
+ASSEMBLY COMPLETE, NO ERRORS FOUND
+
+HD61700 ASSEMBLER Rev 0.43 - MAP LIST OF [cksum.asm]
+ LABEL           : ADDRESS(hex)  | LABEL           : ADDRESS(hex)
+-------------------------------------------------------------------
+ BASE            :   7000h     A | here            :   7000h      A
+ loop            :   700Fh     A | fold            :   701Bh      A
+ nofold          :   701Fh     A | lastbyte        :   7024h      A
+ fold2           :   7032h     A | end             :   7036h      A
+
+ START ADDRESS   = 7000h
+ END ADDRESS     = 703Dh
+ EXECUTE ADDRESS = 7000h
