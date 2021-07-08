@@ -302,6 +302,7 @@ begin
                             blockwrite(f,pbc_ack,1);
                             if timeout > 0 then timerstart(timer_no,timeout);
                         end;
+                        blockwrite(f,pbc_stx,1);
                         pkt.len := plen + bpos - pb_mcn;
                         bpos := 0;
                         plen := 0;

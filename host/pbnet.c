@@ -17,9 +17,12 @@
 #include "serport.h"
 #include "tunif.h"
 
+#define PB_BLOCKSIZE 190
+#define B2B_DELAY 2000
+
 #define WAIT_DELAY 4000 /* usleep during the initial ping */
 #define MTU 1500
-#define PB_BLOCKSIZE 190
+
 #define TXQLEN 5 /* default TX queue length */
 
 #define V4 4
@@ -180,6 +183,23 @@ static void dec_block(const void *ibuf, void *obuf, const size_t blocklen) {
     }
 }
 
+/* send a block of data to the serial port, with an optional per-byte delay */
+static int sp_xmit(int fd, void* buf, size_t len) {
+    if(len == 1 || B2B_DELAY == 0) {
+        return write(fd, buf, len);
+    } else {
+
+        for(int i = 0; i < len; i++) {
+            int ret = write(fd,buf++, 1);
+            if(ret < 0) return ret;
+            usleep(B2B_DELAY);
+        }
+
+        return len;
+    }
+
+}
+
 /* send an ACK and wait for response indefinitely, repeating every 256 WAIT_DELAY */
 static void pb_ping(int fd) {
 
@@ -261,7 +281,7 @@ static size_t pb_send_block(struct pbnet *pb) {
     }
 
     clock_gettime(CLOCK_MONOTONIC, &pb->sp_tx_blockts); 
-    ret = write(pb->sp_fd, obuf, len + PB_MCN);
+    ret = sp_xmit(pb->sp_fd, obuf, len + PB_MCN);
 
     pb->sp_tx_bcount++;
     pb->sp_tx_oh += PB_MCN;
@@ -476,6 +496,26 @@ int main (int argc, char **argv) {
     unsigned char sbuf[MTU+1];
     unsigned char nbuf[MTU+1];
 
+    char* def_dev = "/dev/ttyUSB0";
+    char* def_ip = "10.99.99.1";
+
+    char* ipstr = def_ip;
+    char* sdev = def_dev;
+
+    if(argc < 2) {
+        fprintf(stderr, "[PBNET INIT] no arguments given, using: device=%s, host side IP=%s\n", sdev, ipstr);
+        fprintf(stderr, "[PBNET INIT] to change, run %s [device] [IP]\n", argv[0]);
+    }
+
+    if(argc > 1) {
+        sdev = argv[1];
+    }
+
+    if(argc > 2) {
+        ipstr = argv[2];
+    }
+
+
     /* serial port parameters */
     sp_params params = {
         .baudrate = 9600,
@@ -489,7 +529,7 @@ int main (int argc, char **argv) {
     };
 
     /* set up serial port and tun interface */
-    struct pbnet pb = pbnet_init("/dev/ttyUSB0", &params, "10.99.99.1", 24);
+    struct pbnet pb = pbnet_init(sdev, &params, ipstr, 24);
 
     /* don't worry Bob, I'll fix these later (not) */
     if (pb.sp_fd==-1) {
