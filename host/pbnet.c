@@ -527,7 +527,7 @@ static int parse_config(int argc, char ** argv) {
         switch(c) {
             case 'h': 
                         usage();
-                        return 0;
+                        return -1;
             case 'd':
                         _config.sdev = optarg;
                         break;
@@ -535,7 +535,7 @@ static int parse_config(int argc, char ** argv) {
                         n = atoi(optarg);
                         if(n < 300 || n > 9600) {
                             dprintf(stderr,PROGNAME": baud rate out of range (300..9600)\n");
-                            return -1;
+                            return -2;
                         }
                         _config.baudrate = n;
                         break;
@@ -543,7 +543,7 @@ static int parse_config(int argc, char ** argv) {
                         n = atoi(optarg);
                         if(n < 16 || n > 256) {
                             dprintf(stderr,PROGNAME": block size out of range (16..256)\n");
-                            return -1;
+                            return -2;
                         }
                         _config.blocksize = n;
                         break;
@@ -551,7 +551,7 @@ static int parse_config(int argc, char ** argv) {
                         n = atoi(optarg);
                         if(n < 0) {
                             dprintf(stderr,PROGNAME": rate limit out of range (0..)\n");
-                            return -1;
+                            return -2;
                         }
                         _config.bpslimit = n;
                         break;
@@ -562,14 +562,14 @@ static int parse_config(int argc, char ** argv) {
                         n = atoi(optarg);
                         if(n < 0 || n>31) {
                             dprintf(stderr,PROGNAME": netmask out of range (0..31)\n");
-                            return -1;
+                            return -2;
                         }
                         _config.netmask = n;
                         break;
             default:
                         dprintf(stderr,"\n");
                         usage();
-                        return -1;
+                        return -3;
         }
 
     }
