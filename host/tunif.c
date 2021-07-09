@@ -67,9 +67,11 @@ int tunif_open(const char *saddr, const uint8_t mask, const int queuelen) {
     if(res == -1) goto die;
 
     /* set desired TX queue length */
-    ifr.ifr_qlen = queuelen;
-    res = ioctl(sfd, SIOCSIFTXQLEN, &ifr);
-    if(res == -1) goto die;
+    if(queuelen > 0 ) {
+        ifr.ifr_qlen = queuelen;
+        res = ioctl(sfd, SIOCSIFTXQLEN, &ifr);
+        if(res == -1) goto die;
+    }
 
     /* dispose of the helper socket */
     close(sfd);
