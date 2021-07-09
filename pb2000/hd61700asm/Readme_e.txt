@@ -1,10 +1,10 @@
 -------------------------------------------------------------------------
- HD61     :  HD61700 CROSS ASSEMBLER for Win32 (Rev 0.43)
- System   :  Win95/98/98SE/NT4/2000/XP
+ HD61     :  HD61700 CROSS ASSEMBLER for Win32 (Rev 0.44)
+ System   :  Win95/98/98SE/NT4/2000/XP/Vista/8/10
           :  PB-1000 + RP-32 & RS232C Interface (FA-7 or MD-100)
- Produce  :  Copyright (c) BLUE (QZE12045@NIFTY.COM) 2003 - 2008
+ Produce  :  Copyright (c) BLUE (QZE12045@NIFTY.COM) 2003 - 2021
  Homepage :  http://hd61700.yukimizake.net/ (source code)
-          :  http://www.lsigame.com/  (Casio PB-1000 Forever!)
+          :  http://hd61700.yukimizake.net/  (Casio PB-1000 Forever!)
 -------------------------------------------------------------------------
 About HD61.
 -----------
@@ -19,7 +19,8 @@ item.
 1. HD61 has the upper compatibility function to PB-1000 built-in assembler. 
 2. The symbol label can be defined up to 16 character length. 
    And, it can be defined as long as the memory capacity permits. 
-3. Output file form is DATA sentence of BASIC or format of PBF or QL(note 1).
+3. Output file form is DATA sentence of BASIC or format of PBF or QL(note 1)
+   or PAS.
 4. Supporting the all of documented or undocumented HD61700 instructions.
    Supporting mnemonic description of "Europe" from revision 0.41.
    (option '/eu' or directive '#EU')
@@ -40,8 +41,8 @@ Please use HD61 Rev0.33 when you want to use a past mnemonic'JP($)'.
   JP ($C5)  --> JP $C5
 
  Download Rev 0.33
-  http://www.geocities.jp/hd61700lab/HD61R033.zip (Win32)
-  http://www.geocities.jp/hd61700lab/HD61D033.zip (Dos)
+  http://hd61700.yukimizake.net/HD61R033.zip (Win32)
+  http://hd61700.yukimizake.net/HD61D033.zip (Dos)
 
 Contents in the compression file.
 ---------------------------------
@@ -60,7 +61,7 @@ HD61 [name of the source file] [Output options] [Option for symbol definition ..
 
 When the assembly of the source file ends normally,it is displayed,
  "ASSEMBLY COMPLETE ,NO ERRORS FOUND". 
-And, '*.bas' or '*.pbf' or '*.ql' and '*.lst' file are output. 
+And, '*.bas' or '*.pbf' or '*.ql' or '*.pas' and '*.lst' file are output. 
 When the error occurs ,the error line is displayed.
 
 for example)
@@ -76,6 +77,7 @@ for example)
 (1)Output options.
  /p  --------- Output file is PBF format.(default: BASIC format.)
  /q  --------- Output file is QL(Quick Loader) format.
+ /s  --------- Output file is PAS(Dl-Pascal inline) format.()
  /n  --------- Not optimize.(note 2)
  /tab -------- Output '*.lst' use tab=8 code.
  /w  --------- Selects the 16bit(word size) addressing.(LEVEL 0 fixation)
@@ -141,10 +143,24 @@ The file is forwarded to PB-1000.
  Please refer to "README_E.TXT" appended to DA61 for information on the QL form file.
  ..sorry..(^^;
 
+[d] PAS format. (By Wojciech Owczarek)
+ DL-Pascal inline() assembler code with extension .pas.
+for example)
+ >HD61 source.asm /s [enter]
+ ->Output 'source.pas'.
+*.pas format
+-----
+inline(
+	$D1,$02,$38,$93,$77,$AB,$02,$D6,$40,$D5,$12,$D6,$00,$D4,$02,$D6,
+	$D8,$D6,$40,$55,$14,$D6,$00,$F8,$02,$D6,$20
+);
+
+
 HD61/HD61700 assembly language manual
 --------------------------------------
 The latest document can be downloaded from this site.
- http://www.geocities.jp/hd61700lab/
+ http://hd61700.yukimizake.net/
+
 
 Error Messages
 ---------------
@@ -191,6 +207,7 @@ Reference when HD61 is developed
    ('Vintage programmable calculators' http://www.pisi.com.pl/piotr433/ )
 12.[Analysis of IB register.] by Miyura / Piotr Piatek 2007/2
 13.[DL-Pascal] 1988-1990 Hans Larsson/(c)DATA-LARSSON
+14.[DL-Pascal inline() assembler format] By Wojciech Owczarek 2021/7/8
 
 History of HD61
 ----------------
@@ -292,3 +309,7 @@ Rev 0.41  2008.05.05  Supporting mnemonic description of Europe.(note 3)
 Rev 0.41  2009.02.12  recompiled.
 Rev 0.42  2011.01.03  /r option modified.
 Rev 0.43  2011.01.07  /r option modified.(.roc format renewal)
+Rev 0.44  2021.07.09  (1)'/s' option added.(support *.pas format)
+                      (2)Changed type from unsigned long to unsigned int.
+                      (3)EOFERR is changed to NORMAL (0).
+                      (4)Stopped adding EOF to output files.(Win32)

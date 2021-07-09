@@ -1,6 +1,6 @@
 -------------------------------------------------------------------------
-–¼Ì      HD61700 CROSS ASSEMBLER for Win32 (Rev 0.43)
-“®ìŠÂ‹«  Win95/98/98SE/NT4/2000/XP
+–¼Ì      HD61700 CROSS ASSEMBLER for Win32 (Rev 0.44)
+“®ìŠÂ‹«  Win95/98/98SE/NT4/2000/XP/Vista/8/10
           PB-1000/C/AI-1000+Žü•Ó‹@Ší(FA-7 ‚Ü‚½‚Í MD-100A)
           VX-3/VX-4/FX-870P+Žü•Ó‹@Ší(FA-6(S)AFA-8ARS232CƒŒƒxƒ‹ƒRƒ“ƒo[ƒ^)
 –ÆÓŽ–€  –{ƒvƒƒOƒ‰ƒ€‚ÍƒtƒŠ[ƒ\ƒtƒg‚Å‚·BD‚«‚È‚æ‚¤‚ÉŽg‚Á‚Ä‚­‚¾‚³‚¢B
@@ -27,7 +27,7 @@ URL       http://hd61700.yukimizake.net/
     #EU(‚Ü‚½‚Í/eu)Žw’è‚É‚æ‚èAAI/KCŒ`Ž®‚©‚çEU(Europe)Œ`Ž®‚ÉØ‚è‘Ö‚¦‰Â”\‚Å‚·B
   4.ƒZƒJƒ“ƒhƒIƒyƒŒ[ƒVƒ‡ƒ“Šg’£($0,$30,$31,LD&JR)“™‚ªƒfƒtƒHƒ‹ƒg‚ÅŽw’è‰ÂB
     (/n ƒIƒvƒVƒ‡ƒ“Žw’è‚É‚ÄOFFj
-  5.o—ÍŒ`Ž®‚ÍABASIC‚ÌDATA•¶Œ`Ž®‚ÆPBFŒ`Ž®(’1)‚©‚ç‘I‘ð‚Å‚«‚Ü‚·B
+  5.o—ÍŒ`Ž®‚ÍABASIC‚ÌDATA•¶Œ`Ž®‚ÆPBFŒ`Ž®(’1)‚Ü‚½‚ÍPASŒ`Ž®‚©‚ç‘I‘ð‚Å‚«‚Ü‚·B
    iPBFŒ`Ž®o—ÍŽž‚É /p ƒIƒvƒVƒ‡ƒ“‚ðŽw’èj
   6.®Œ`‚³‚ê‚½ƒŠƒXƒgƒtƒ@ƒCƒ‹(.lst)‚ðo—Í‚µ‚Ü‚·B
   7.PB-1000‚ÅƒTƒ|[ƒg‚³‚ê‚Ä‚¢‚È‚¢‹^Ž—–½—ß(DW¤LEVEL¤#if¤#else¤#endif,#include“™)
@@ -51,8 +51,8 @@ Rev 0.34‚æ‚èA]—ˆ 'JP ($C5)'‚Æ•\‹L‚³‚ê‚Ä‚¢‚½–½—ßŒê‚Ìƒjƒ‚ƒjƒbƒN‚ª•ÏX‚Æ‚È‚Á‚Ä‚¢‚
 ‚¨Šè‚¢‚µ‚Ü‚·Bi¬—‚³‚¹‚Ä‚µ‚Ü‚¢A‘å•Ï\‚µ–ó‚ ‚è‚Ü‚¹‚ñj
 
  Rev 0.33 ‚ÍˆÈ‰º‚æ‚è“üŽè‚Å‚«‚Ü‚·B
-  http://www.geocities.jp/hd61700lab/HD61R033.zip (Win32)
-  http://www.geocities.jp/hd61700lab/HD61D033.zip (Dos)
+  http://hd61700.yukimizake.net/HD61R033.zip (Win32)
+  http://hd61700.yukimizake.net/HD61D033.zip (Dos)
 
 ¡ ƒtƒ@ƒCƒ‹“à—e
   README.TXT    (‚±‚Ìƒtƒ@ƒCƒ‹‚Å‚·)
@@ -90,6 +90,7 @@ Rev.0.09ˆÈ~Aƒ\[ƒXƒtƒ@ƒCƒ‹–¼‚ª8•¶ŽšˆÈã‚¾‚Á‚½ê‡Aƒ[ƒjƒ“ƒO‚ð•\Ž¦‚µ‚Ü‚·B
  ƒAƒZƒ“ƒuƒ‹Žž‚ÉˆÈ‰º‚ÌƒIƒvƒVƒ‡ƒ“‚ªŽw’è‚Å‚«‚Ü‚·B
   /p ---  PBFŒ`Ž®‚Åo—Í‚·‚éBiƒfƒtƒHƒ‹ƒg‚ÍBASIC DATA•¶Œ`Ž®‚Åo—Í)
   /q ---  QL(ƒNƒCƒbƒNƒ[ƒ_)Œ`Ž®‚Åo—Í‚·‚éB
+  /s ---  PAS(DL-Pascal—pinline)Œ`Ž®‚Åo—Í‚·‚éB
   /n ---  ƒZƒJƒ“ƒhƒIƒyƒŒ[ƒVƒ‡ƒ“Žw’è‚É‚æ‚éÅ“K‰»‚ðOFF‚É‚·‚éiƒfƒtƒHƒ‹ƒg‚ÍONj
   /w ---  16bitƒAƒhƒŒƒbƒVƒ“ƒO‘Î‰ž‚ÌƒAƒZƒ“ƒuƒ‹‚ðs‚¤B(Å“K‰»‚Í LEVEL 0 ŒÅ’è)
           “à‘ ROM—p‚Ì16BitƒAƒhƒŒƒX‚É‘Î‰ž‚µ‚½ƒAƒZƒ“ƒuƒ‹ƒR[ƒh‚ðo—Í‚µ‚Ü‚·B
@@ -180,11 +181,26 @@ BASŒ`Ž®‚ÆPBFŒ`Ž®‚ÅŽÀs•û–@‚ªˆá‚¤‚Ì‚Å‚²’ˆÓ‰º‚³‚¢B
 ƒtƒ@ƒCƒ‹(BASIC)‚Æƒ}[ƒW‚µ‚Ä—˜—p‚µ‚Ü‚·B
 Ú×‚ÍADA61‚É•t‘®‚·‚éƒhƒLƒ…ƒƒ“ƒg‚É‚ ‚éà–¾‚ðŒ©‚Ä‰º‚³‚¢B
 
+‚SDPASŒ`Ž®
+PB-2000C—p‚ÌDl-PascalƒJ[ƒh‚Å—˜—p‚Å‚«‚éŒ`Ž®‚Å‚·B
+Wojciech OwczarekŽ‚ª’Ç‰Á‚µ‚½Œ`Ž®‚Åƒ\[ƒXƒR[ƒh‚Éinline()‚Åƒ}[ƒW‚µ‚Ä—˜—p‚·‚é‚Æ‚ÌŽ–‚Å‚·B
+
+/SƒIƒvƒVƒ‡ƒ“•t‚«‚ÅƒAƒZƒ“ƒuƒ‹‚·‚é‚ÆA*.pasŒ`Ž®‚Ìƒtƒ@ƒCƒ‹‚ðo—Í‚µ‚Ü‚·B
+ >HD61 source.asm /s [enter]
+ ->Output 'source.pas'.
+
+*.pas Œ`Ž®‚ÍAˆÈ‰º‚Ì‚æ‚¤‚Éinlineƒwƒbƒ_‚Æƒf[ƒ^‚ª•À‚ñ‚Å‚¢‚Ü‚·B
+-----
+inline(
+	$D1,$02,$38,$93,$77,$AB,$02,$D6,$40,$D5,$12,$D6,$00,$D4,$02,$D6,
+	$D8,$D6,$40,$55,$14,$D6,$00,$F8,$02,$D6,$20
+);
+
 ¡ ƒAƒZƒ“ƒuƒ‰‚Ì•¶–@‚É‚Â‚¢‚Ä
 HD61‚ªƒTƒ|[ƒg‚·‚é‹^Ž—–½—ß‚âAƒjƒ‚ƒjƒbƒN‚Ì‹Lq‘Ž®“™‚ÍA“Y•t‚ÌHD61700.s(‹y‚Ñlst)‚ð
 ŽQÆ‰º‚³‚¢B‚Ü‚½HD61700ƒAƒZƒ“ƒuƒŠŒ¾ŒêŽd—l‚ÉŠÖ‚µ‚Ä‚ÍƒIƒ“ƒ‰ƒCƒ“ƒ}ƒjƒ…ƒAƒ‹‚ðŽQÆ‰º‚³‚¢B
 ¦ƒIƒ“ƒ‰ƒCƒ“ƒ}ƒjƒ…ƒAƒ‹‚ÍŒ»ÝAHD61‚Æ“¯‚¶URL‚ÉŒöŠJ‚³‚ê‚Ä‚¢‚Ü‚·B
-( URL http://www.geocities.jp/hd61700lab/ )
+( URL http://hd61700.yukimizake.net/ )
 
 ¡ ƒGƒ‰[ƒƒbƒZ[ƒW
 ƒAƒZƒ“ƒuƒ‹’†‚É•\Ž¦‚·‚éƒGƒ‰[ƒƒbƒZ[ƒW‚ÍˆÈ‰º‚Ì’Ê‚è‚Å‚·B
@@ -220,7 +236,7 @@ HD61‚ÍABoland C++ Builder(free”Å)‚É‚ÄƒRƒ“ƒpƒCƒ‹/ì¬‚µ‚Ä‚¢‚Ü‚·B
 ‚»‚ë‚»‚ë‘å‚«‚ÈƒoƒO‚à‚È‚­‚È‚Á‚Ä‚«‚½‚½‚ßAƒ\[ƒXƒR[ƒh‚ðŒöŠJ‚µ‚Ü‚µ‚½B
 ³’¼A‚©‚È‚è—c’t‚ÈƒR[ƒh‚È‚Ì‚ÅƒAƒZƒ“ƒuƒ‰ˆ—‚ÌŽQl‚ÆŒ¾‚¤‚æ‚è‚ÍA
 HD61700–½—ßƒR[ƒhŽ‘—¿‚Æ‚µ‚ÄŽg‚Á‚Ä‚­‚¾‚³‚¢B
-( URL http://www.geocities.jp/hd61700lab/ )
+( URL http://hd61700.yukimizake.net/  )
 “ú–{‚Å‚Í’˜ìŒ ‚ª•úŠü‚Å‚«‚È‚¢‚ç‚µ‚¢‚Ì‚Å‚·‚ªA“Á‚É§ŒÀ‚ð‚©‚¯‚é‚Â‚à‚è‚Í‚È‚­A
 D‚«‚ÉŽg‚Á‚Ä‚­‚¾‚³‚Á‚ÄŒ‹\‚Å‚·B
 i‚»‚Ì‘ã‚í‚è‰½‚©‘¹ŠQ‚ª‚¨‚«‚Ä‚àÓ”C‚Í‚Æ‚ê‚Ü‚¹‚ñ‚ªj
@@ -246,6 +262,7 @@ gcc(Linux)ŠÂ‹«‚Å‚à•’Ê‚ÉƒRƒ“ƒpƒCƒ‹/ŽÀs‚Å‚«‚é‚±‚Æ‚ðŠm”F‚µ‚Ä‚¢‚Ü‚·B
    (¢Vintage programmable calculators£ http://www.pisi.com.pl/piotr433/ )
 13.uIB(‹ŒTS)ƒŒƒWƒXƒ^‚Ì‰ðÍvMiyuraŽ / Piotr PiatekŽ 2007/2
 14.uDL-PascalvHans LarssonŽ/(c)DATA-LARSSON 1988-1990
+15.uDL-Pascal inline() assemblerŒ`Ž®vWojciech OwczarekŽ 2021/7/8
 
 ¡ ‚¨‚í‚è‚É
 ³’¼Œ¾‚Á‚ÄŠJ”­/”­•\‚ª10”N’x‚©‚Á‚½ƒvƒƒOƒ‰ƒ€‚¾‚ÆŽv‚¢‚Ü‚·B
@@ -273,6 +290,12 @@ Hans LarssonŽ‚ÌŠJ”­‚µ‚½PB-2000(ŠCŠO”ÅAI-1000)—pDL-Pascal Compiler‚ÌƒTƒ|[ƒg‚·‚é
 ”ñí‚É‹»–¡[‚¢‚à‚Ì‚Å‚·B
 
 EUŒ`Ž®ƒjƒ‚ƒjƒbƒN‚ÌÚ×‚É‚Â‚¢‚Ä‚ÍAƒIƒ“ƒ‰ƒCƒ“ƒ}ƒjƒ…ƒAƒ‹‚ðŽQÆ‰º‚³‚¢B
+
+’Ç‹L 2021/7/9
+‰½‚Æ10”N‚Ô‚è‚ÌXV‚Å‚·BEUŒ`Ž®‚ðƒTƒ|[ƒg‚µ‚½‚±‚Æ‚ÅŠCŠO‚Å‚àŽg‚Á‚Ä‚­‚ê‚Ä‚¢‚é•û‚ª‚¢‚½‚æ‚¤‚ÅA
+Wojciech Owczarek‚³‚ñ‚©‚ç‹@”\’Ç‰Á‚ÆC³ˆÄ‚ð’¸‚«ARev0.44‚Æ‚µ‚ÄƒŠƒŠ[ƒX‚µ‚Ü‚µ‚½B
+ŽèŽ‚¿‚ÌPB-1000‚à‚©‚È‚è‚­‚½‚Ñ‚ê‚Ä‚«‚Ä‚¢‚Ü‚·‚ªA‚±‚Ì‹@‰ï‚É­‚µ˜M‚Á‚Ä‚â‚ë‚¤‚©‚ÆŽv‚Á‚Ä‚¢‚Ü‚·B
+
 
 ¡ —š—ð
 Rev 0.01  2003.01.06  Å‰‚Ìƒo[ƒWƒ‡ƒ“BŽæ‚è‚ ‚¦‚¸“à‘ ƒAƒZƒ“ƒuƒ‰ŒÝŠ·‚Å“®ì
@@ -434,3 +457,12 @@ Rev 0.41  2009.02.12  ƒŠƒRƒ“ƒpƒCƒ‹ŽÀŽ{BUPXˆ³k‚ð‰ðœ(ƒEƒBƒ‹ƒXƒoƒXƒ^[‚ªŒë“®ì‚·
 Rev 0.42  2011.01.03  /rƒIƒvƒVƒ‡ƒ“‚Ì‰ü—ÇBroco—ÍðŒ‚ðC³‚µ‚½B
                       ƒAƒZƒ“ƒuƒ‹‘¬“x‚ÌŽáŠ±‚Ì‚‘¬‰»B
 Rev 0.43  2011.01.07  /rƒIƒvƒVƒ‡ƒ“‚Ì‰ü—ÇBRRŒ`Ž®Ver.2‘Î‰žB
+Rev 0.44  2021.07.09  (1)/sƒIƒvƒVƒ‡ƒ“‚ð’Ç‰ÁBDl-Pascal—p‚ÌinlineŒ`Ž®‚Ìo—Í‚ðƒTƒ|[ƒgB
+                      (2)unsigned long‚ðunsigned int‚É•ÏXB
+                       ŒÃ‚¢ƒRƒ“ƒpƒCƒ‰(DOS)—p‚ÉŽg‚Á‚Ä‚Ü‚µ‚½‚ªÅ‹ß‚ÌlinuxŒnƒRƒ“ƒpƒCƒ‰‚Æ‚Ì‘Š«‚ª
+                       ‚æ‚ë‚µ‚­‚È‚¢‚Æ‚ÌŽ–‚ÅC³‚µ‚Ü‚µ‚½B
+                      (3)ƒtƒ@ƒCƒ‹ÅI‚ðŒŸ’m‚µ‚½ÛA2(EOFERR)‚ðOS‘¤(ERRORLEVEL)‚É–ß‚µ‚Ä‚¢‚Ü‚µ‚½‚ª
+                       ƒtƒ@ƒCƒ‹ÅIŒŸ’m‚ÍƒGƒ‰[‚Å‚Í‚È‚¢‚Ì‚Å³í(NORM)‚ð–ß‚·‚æ‚¤‚ÉC³B
+                      (4)o—Íƒtƒ@ƒCƒ‹‚Ö‚ÌEOF•t—^‚ð”pŽ~‚µ‚Ü‚µ‚½B
+                       DOS‚Å‚ÍEOF•t—^‚Í•Ö—˜‚È–Ê‚à‚ ‚è‚Ü‚µ‚½‚ªAÅ‹ß‚ÌOS‚Å‚Í•s—v‚Èê‡‚à‘½‚­
+                       ”pŽ~‚·‚é‚±‚Æ‚É‚µ‚Ü‚µ‚½B
