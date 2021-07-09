@@ -507,10 +507,11 @@ blockdone:
 static void usage() {
     dprintf(stderr,"usage: "PROGNAME" [-d STRING ] [-b NUM] [-B NUM] [-l NUM]\n"\
                    "             [-a STRING ] [-m NUM]\n\n"\
-                   "         -d: serial device to attach to (default=%s)\n"\
+                   "         -d: serial device to attach to (default:%s)\n"\
                    "         -b: baud rate (300..9600, default:%d)\n"\
                    "         -B: block size (16..256, default:%d)\n"\
-                   "         -l: rate limit in Bytes per second, (0:no limit, default:%d)\n"\
+                   "         -l: serial port TX rate limit in Bps/cps\n"\
+                   "             (0:no limit, default:%d)\n"\
                    "         -a: IPv4 address on host side (default:%s)\n"\
                    "         -m: netmask (0..31, default: %d)\n\n",
                     _config.sdev, _config.baudrate,_config.blocksize,_config.bpslimit,
@@ -567,8 +568,7 @@ static int parse_config(int argc, char ** argv) {
                         _config.netmask = n;
                         break;
             default:
-                        dprintf(stderr,"\n");
-                        usage();
+                        dprintf(stderr,PROGNAME": try -h for list of options\n");
                         return -3;
         }
 
