@@ -506,16 +506,18 @@ blockdone:
 
 static void usage() {
     dprintf(stderr,"usage: "PROGNAME" [-d STRING ] [-b NUM] [-B NUM] [-l NUM]\n"\
-                   "             [-a STRING ] [-m NUM] [-q NUM]\n\n"\
+                   "             [-a STRING ] [-m NUM] [-q NUM] [-h]\n\n"\
                    "         -d: serial device to attach to (default:%s)\n"\
                    "         -b: baud rate (300..9600, default:%d)\n"\
                    "         -B: block size (16..256, default:%d)\n"\
                    "         -l: serial port TX rate limit in Bps/cps\n"\
                    "             (0:no limit, default:%d)\n"\
                    "         -a: IPv4 address on host side (default:%s)\n"\
-                   "         -m: netmask (0..31, default: %d)\n"\
+                   "         -m: netmask (0..31, default:%d)\n"\
                    "         -q: TUN interface TX queue length (0..)\n"\
-                   "             default: %d, 0:system default)\n\n",
+                   "             default:%d, 0:OS default)\n"\
+                   "         -h: this here help\n"\
+                   "\n",
                     _config.sdev, _config.baudrate,_config.blocksize,_config.bpslimit,
                     _config.ipstr,_config.netmask,_config.txqlen
     );
