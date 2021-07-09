@@ -6,6 +6,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -17,18 +18,37 @@
 #include "serport.h"
 #include "tunif.h"
 
-#define PB_BLOCKSIZE 190
-#define B2B_DELAY 2000
+static char* def_sdev = "/dev/ttyUSB0";
+static char* def_ipstr = "10.99.99.1";
 
-#define WAIT_DELAY 4000 /* usleep during the initial ping */
+struct pbnet_config {
+    int baudrate;
+    int bpslimit;
+    int txqlen;
+    size_t blocksize;
+    char* sdev;
+    char* ipstr;
+    uint8_t netmask;
+};
+
+/* config defaults */
+static struct pbnet_config _config = {
+    .baudrate = 9600,
+    .bpslimit = 0,
+    .txqlen = 5,
+    .blocksize = 190,
+    .netmask = 24
+};
+
+#define PROGNAME "pbnet"
+#define INIT_DELAY 10000 /* usleep during the initial ping */
+#define MAX_BLOCKSIZE 256
 #define MTU 1500
-
-#define TXQLEN 5 /* default TX queue length */
-
 #define V4 4
 #define V6 6
 
 #define dprintf fprintf
+
 
 /* simplified IP header, just to recognise v4/v6 */
 struct iphdr {
@@ -49,7 +69,7 @@ struct pbnet {
     size_t sp_rx_plen;                       /* running length of packet being assembled */
     size_t sp_rx_blen;                       /* length of currently received block */
     unsigned char sp_rx_pbuf[MTU];           /* incoming packet buffer */
-    unsigned char sp_rx_bbuf[PB_BLOCKSIZE];  /* incoming block buffer  */
+    unsigned char sp_rx_bbuf[MTU];          /* incoming block buffer  */
 
     /* outgoing packet over serial */
     size_t sp_tx_plen, sp_tx_left, sp_tx_oh; /* length of outgoing packet, bytes left to send, total overhead */
@@ -87,9 +107,6 @@ enum {
     PB_RTX = 0x03,  /* resume transmission (flow control) */
     PB_MCN          /* max control char = count of control chars */
 };
-
-/* for convenience only */
-#define PB_BSIZE (PB_BLOCKSIZE - PB_MCN)
 
 /* character constants to send directly */
 static const char PBC_ACK = PB_ACK; /* only this one for now */
@@ -185,14 +202,16 @@ static void dec_block(const void *ibuf, void *obuf, const size_t blocklen) {
 
 /* send a block of data to the serial port, with an optional per-byte delay */
 static int sp_xmit(int fd, void* buf, size_t len) {
-    if(len == 1 || B2B_DELAY == 0) {
+
+    if(len == 1 || _config.bpslimit == 0) {
         return write(fd, buf, len);
     } else {
 
         for(int i = 0; i < len; i++) {
             int ret = write(fd,buf++, 1);
             if(ret < 0) return ret;
-            usleep(B2B_DELAY);
+            int sld = 9E5 / _config.bpslimit;
+            while (usleep(sld) == EINTR) usleep(sld);
         }
 
         return len;
@@ -200,7 +219,7 @@ static int sp_xmit(int fd, void* buf, size_t len) {
 
 }
 
-/* send an ACK and wait for response indefinitely, repeating every 256 WAIT_DELAY */
+/* send an ACK and wait for response indefinitely, repeating every 256 INIT_DELAY */
 static void pb_ping(int fd) {
 
     unsigned char c;
@@ -210,7 +229,7 @@ static void pb_ping(int fd) {
         if(n++ == 0) {
              write(fd,&PBC_ACK,1);
         }
-        usleep(WAIT_DELAY);
+        usleep(INIT_DELAY);
         if (sp_nread(fd) > 0 && read(fd,&c,1) == 1 && c == PB_ACK) break;
     };
 
@@ -227,7 +246,7 @@ struct pbnet pbnet_init(const char* dev, const sp_params *params, const char* ad
 
     dprintf(stderr, "[       TUN] Setting up tun interface with %s/%d... ", addr, mask);
 
-    ret.tun_fd = tunif_open(addr, mask, TXQLEN);
+    ret.tun_fd = tunif_open(addr, mask, _config.txqlen);
 
     dprintf(stderr, "done.\n");
 
@@ -263,8 +282,8 @@ static void pbnet_close(struct pbnet *pb) {
 /* encode and send a data block to PB */
 static size_t pb_send_block(struct pbnet *pb) {
 
-    unsigned char obuf[PB_BLOCKSIZE];
-    size_t len = (pb->sp_tx_left > PB_BSIZE) ? PB_BSIZE : pb->sp_tx_left;
+    unsigned char obuf[_config.blocksize];
+    size_t len = (pb->sp_tx_left > (_config.blocksize - PB_MCN)) ? (_config.blocksize - PB_MCN) : pb->sp_tx_left;
     size_t ret;
 
     if(pb->sp_tx_left == 0) {
@@ -348,7 +367,7 @@ static void ts_diff(struct timespec *a, struct timespec *b) {
 }
 /* timespec to double ms */
 static double ts_ms(struct timespec *ts) {
-    return (ts->tv_sec * 1E9 + ts->tv_nsec + 0.0)/1000000.0;
+    return ((ts->tv_sec+0.0) * 1E9 + ts->tv_nsec + 0.0)/1000000.0;
 }
 
 
@@ -386,7 +405,7 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
                                         pktdur = ts_ms(&pkt_ts);
                                         bps = (pb->sp_tx_plen * 1000.0) / pktdur;
                                         dprintf(stderr, "[PBNET<-SER] Got ACK (%.03f ms)\n", ackdur);
-                                        dprintf(stderr, "[PBNET->SER] TX pkt #%d done, total o/h %d/%d (%.02f%%), took %.02f ms, %.0f Bps mean\n",
+                                        dprintf(stderr, "[PBNET->SER] TX pkt #%d done, total o/h %d/%d (%.03f%%), took %.03f ms, %.0f Bps mean\n",
                                                             pb->sp_tx_count, pb->sp_tx_oh, pb->sp_tx_plen, 100.0*((pb->sp_tx_oh + 0.0) / pb->sp_tx_plen),
                                                             pktdur, bps);
                                         /* IMPORTANT: automatically pause TX to allow PB to service the packet */
@@ -430,21 +449,21 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
                 }
             }
             pb->sp_rx_bbuf[pb->sp_rx_blen++] = c;
-            if(pb->sp_rx_blen == PB_BLOCKSIZE) {
+            if(pb->sp_rx_blen == _config.blocksize) {
 blockdone:
                 clock_gettime(CLOCK_MONOTONIC, &block_ts);
                 pb->sp_rx_ibts = block_ts;
                 pkt_ts = block_ts;
                 ts_diff(&block_ts, &pb->sp_rx_blockts);
                 blockdur = ts_ms(&block_ts);
-                /* we can have a zero-length block if plen == BSIZE */
+                /* we can have a zero-length block if plen == blocksize - pb_mcn */
                 if(pb->sp_rx_blen > 0) {
                     pb->sp_rx_oh += PB_MCN;
                     pb->sp_rx_bcount++;
 
-                    dprintf(stderr, "[PBNET<-SER] RX pkt #%d block #%d (%d B), took %.02f ms", pb->sp_rx_count + 1, pb->sp_rx_bcount, pb->sp_rx_blen, blockdur);
+                    dprintf(stderr, "[PBNET<-SER] RX pkt #%d block #%d (%d B), took %.03f ms", pb->sp_rx_count + 1, pb->sp_rx_bcount, pb->sp_rx_blen, blockdur);
                     if(pb->sp_rx_bcount > 1) {
-                        dprintf(stderr,", inter-block %.02f ms", pb->ibdur);
+                        dprintf(stderr,", inter-block %.03f ms", pb->ibdur);
                     }
                     dprintf(stderr, "\n");
 
@@ -464,7 +483,7 @@ blockdone:
                     pktdur = ts_ms(&pkt_ts);
                     bps = (pb->sp_rx_plen * 1000.0) / pktdur;
                     dprintf(stderr, "[PBNET<-SER] Got SEP, end of packet\n");
-                    dprintf(stderr, "[PBNET<-SER] Rx pkt #%d done, total o/h %d/%d (%.02f%%),took %.02f ms,  %.0f Bps mean\n", pb->sp_rx_count + 1,
+                    dprintf(stderr, "[PBNET<-SER] Rx pkt #%d done, total o/h %d/%d (%.02f%%),took %.03f ms,  %.0f Bps mean\n", pb->sp_rx_count + 1,
                             pb->sp_rx_oh, pb->sp_rx_plen,100.0*((pb->sp_rx_oh + 0.0) / pb->sp_rx_plen) ,  pktdur, bps);
                     dprintf(stderr, "[PBNET->TUN] Forwarding %d-byte packet to host\n", pb->sp_rx_plen);
 #ifdef PB_DUMP_BUF
@@ -485,7 +504,80 @@ blockdone:
 
 }
 
-/* event loop */
+static void usage() {
+    dprintf(stderr,"usage: "PROGNAME" [-d STRING ] [-b NUM] [-B NUM] [-l NUM]\n"\
+                   "             [-a STRING ] [-m NUM]\n\n"\
+                   "         -d: serial device to attach to (default=%s)\n"\
+                   "         -b: baud rate (300..9600, default:%d)\n"\
+                   "         -B: block size (16..256, default:%d)\n"\
+                   "         -l: rate limit in Bytes per second, (0:no limit, default:%d)\n"\
+                   "         -a: IPv4 address on host side (default:%s)\n"\
+                   "         -m: netmask (0..31, default: %d)\n\n",
+                    _config.sdev, _config.baudrate,_config.blocksize,_config.bpslimit,
+                    _config.ipstr,_config.netmask
+    );
+
+}
+
+static int parse_config(int argc, char ** argv) {
+
+    int c, n;
+
+    while( (c=getopt(argc,argv, "hd:b:B:l:a:m:")) != -1) {
+        switch(c) {
+            case 'h': 
+                        usage();
+                        return 0;
+            case 'd':
+                        _config.sdev = optarg;
+                        break;
+            case 'b':
+                        n = atoi(optarg);
+                        if(n < 300 || n > 9600) {
+                            dprintf(stderr,PROGNAME": baud rate out of range (300..9600)\n");
+                            return -1;
+                        }
+                        _config.baudrate = n;
+                        break;
+            case 'B':
+                        n = atoi(optarg);
+                        if(n < 16 || n > 256) {
+                            dprintf(stderr,PROGNAME": block size out of range (16..256)\n");
+                            return -1;
+                        }
+                        _config.blocksize = n;
+                        break;
+            case 'l':
+                        n = atoi(optarg);
+                        if(n < 0) {
+                            dprintf(stderr,PROGNAME": rate limit out of range (0..)\n");
+                            return -1;
+                        }
+                        _config.bpslimit = n;
+                        break;
+            case 'a':
+                        _config.ipstr = optarg;
+                        break;
+            case 'm':
+                        n = atoi(optarg);
+                        if(n < 0 || n>31) {
+                            dprintf(stderr,PROGNAME": netmask out of range (0..31)\n");
+                            return -1;
+                        }
+                        _config.netmask = n;
+                        break;
+            default:
+                        dprintf(stderr,"\n");
+                        usage();
+                        return -1;
+        }
+
+    }
+
+    return 0;
+}
+
+/* startup + event loop. a good programmer would have separated this into multiple functions - yeah, sue me. */
 int main (int argc, char **argv) {
 
     fd_set fds;
@@ -496,29 +588,16 @@ int main (int argc, char **argv) {
     unsigned char sbuf[MTU+1];
     unsigned char nbuf[MTU+1];
 
-    char* def_dev = "/dev/ttyUSB0";
-    char* def_ip = "10.99.99.1";
+    _config.ipstr = def_ipstr;
+    _config.sdev = def_sdev;
 
-    char* ipstr = def_ip;
-    char* sdev = def_dev;
-
-    if(argc < 2) {
-        fprintf(stderr, "[PBNET INIT] no arguments given, using: device=%s, host side IP=%s\n", sdev, ipstr);
-        fprintf(stderr, "[PBNET INIT] to change, run %s [device] [IP]\n", argv[0]);
+    if((ret=parse_config(argc, argv)) != 0) {
+        return ret;
     }
-
-    if(argc > 1) {
-        sdev = argv[1];
-    }
-
-    if(argc > 2) {
-        ipstr = argv[2];
-    }
-
 
     /* serial port parameters */
     sp_params params = {
-        .baudrate = 9600,
+        .baudrate = _config.baudrate,
         .databits = 8,
         .parity = SP_PARITY_NONE,
         .stopbits = 1,
@@ -529,7 +608,7 @@ int main (int argc, char **argv) {
     };
 
     /* set up serial port and tun interface */
-    struct pbnet pb = pbnet_init(sdev, &params, ipstr, 24);
+    struct pbnet pb = pbnet_init(_config.sdev, &params, _config.ipstr, _config.netmask);
 
     /* don't worry Bob, I'll fix these later (not) */
     if (pb.sp_fd==-1) {

@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS+=-std=c99 -I. -O3
+CFLAGS+=-std=c99 -I. -O3 -D__DLP_INLINE
 BINNAME=hd61700
 
 DEPS = $(BINNAME).h
@@ -17,4 +17,3 @@ $(BINNAME): $(OBJ1)
 
 clean:
 	rm -rf *.o *~ $(BINNAME)
-

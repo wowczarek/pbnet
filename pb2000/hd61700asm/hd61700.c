@@ -129,6 +129,11 @@
 /*                          アセンブル速度高速化(outtbl.kind追加による) */
 /*  Rev : 0.43  2011.01.07  /rオプション処理改良                        */
 /*                          RR形式Ver.2対応                             */
+/*  Rev : 0.44  2021.07.09  unsigned long -> unsigned int に変更        */
+/*                          EOFオプションを無効化(DOS版は変更なし)      */
+/*                          EOFERR(ファイル終了)時は正常終了とする      */
+/*                          /sオプション処理追加                        */
+/*                          DL-PASCAL用のinline形式出力を追加           */
 /*                                                                      */
 /************************************************************************/
 #include<stdio.h>
@@ -144,7 +149,7 @@ char	name[]	="HD61700 ASSEMBLER FOR DOS ";	/* アセンブラ名称   */
 #else
 char	name[]	="HD61700 ASSEMBLER ";	/* アセンブラ名称           */
 #endif
-char	rev[]	="Rev 0.43";			/* Revision                 */
+char	rev[]	="Rev 0.44";			/* Revision                 */
 /* 利用可能文字列 */
 char	LabelStr[]	= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@_";
 char	DecStr[]	= "0123456789";
@@ -318,8 +323,10 @@ char * ptr;
 		if (!strcmp("/p",argv[i])||!strcmp("/P",argv[i])){ OutType = 1;i++; continue; }
 		/* QLファイル出力選択 */
 		if (!strcmp("/q",argv[i])||!strcmp("/Q",argv[i])){ OutType = 2;i++; continue; }
+#if __DLP_INLINE
 		/* DL-Pascal inline() format */
 		if (!strcmp("/s",argv[i])||!strcmp("/S",argv[i])){ OutType = 3;i++; continue; }
+#endif
 		/* bas/pbfファイル名指定 */
 		if (!strcmp("/o",argv[i])||!strcmp("/O",argv[i])){
 			/* 次パラメータあり */
@@ -385,9 +392,6 @@ char * ptr;
 	/* アセンブル処理 */
 	rc = AsmProcess( SrcFile );
 
-	if (rc == EOFERR) {
-		rc = NORM;
-	}
 	return(rc);
 }
 
@@ -443,9 +447,11 @@ char out[8];
 	case 2:
 		sprintf( out ,".ql" );
 		break;
+#if __DLP_INLINE
 	case 3:
 		sprintf( out ,".pas" );
 		break;
+#endif
 	}
 	if ((fptr = strrchr(OutFile, '.' )))
 		sprintf( fptr,"%s", out );
@@ -920,7 +926,6 @@ LBL *Labelwk;
 				}
 				/* カンマ出力 */
 				if ( !( n % 6 ) ) fprintf( OutFD ,"," );
-
 			}
 			/* 残りを0出力 */
 			while( n && ( n < 24 ) ){
@@ -934,34 +939,37 @@ LBL *Labelwk;
 				if ( !( n % 6 ) ) fprintf( OutFD ,"," );
 			}
 			break;
-		/* DL-Pascal inline() format */
+#if __DLP_INLINE
+		/* DL-Pascal inline() format 出力 */
 		case 3:
-			line = 1000;
+			/* ヘッダ出力 */
 			fprintf(OutFD,"inline(\n");
 			for ( cnt = 0 , n = 0 ; cnt < OutCnt ; cnt ++ ){
-				if(n == 0) {
+				if ( n == 0 ) {
 				    fprintf( OutFD, "\t");
 				}
-				/* 行番号出力 */
 				fprintf( OutFD ,"$%02X", OutBuf[cnt] );
-				if(cnt < (OutCnt - 1)) {
+				/* 最終データはカンマを付けない */
+				if( cnt < ( OutCnt - 1 ) ){
 					fprintf( OutFD, ",");
 				}
 				n++;
-				if (n == 16 || cnt == (OutCnt - 1) ){
+				if ( n == 16 || cnt == ( OutCnt - 1 ) ){
 					fprintf( OutFD ,"\n" );
 					n = 0;
 				}
 			}
 			fprintf(OutFD,");\n");
 			break;
-
+#endif
 		}
 #if __WITH_EOF
-		/* EOF出力 */
-		if(OutType != 3) {
-		    fprintf( OutFD ,"%c",0x1a);
-		}
+ #if __DLP_INLINE
+		/* inline形式出力時はEOFを付加しない */
+		if( OutType != 3 )
+ #endif
+			/* EOF出力 */
+			fprintf( OutFD ,"%c",0x1a);
 #endif
 		/* 出力ファイルクローズ */
 		fclose(OutFD);
@@ -991,7 +999,8 @@ asm_end:
 	if (SrcFD) fclose(SrcFD);
 	if (LstFD) fclose(LstFD);
 
-	return rc;
+	/* ファイル最終(EOFERR)は正常完了とする */
+	return (rc == EOFERR) ? NORM : rc;
 }
 /**********************************************************************/
 /*   AsmLine : Assembler Process ( one line )                         */
