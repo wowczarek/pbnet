@@ -12,43 +12,107 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <sys/select.h>
+#include <sys/timerfd.h>
 #include <time.h>
 #include <errno.h>
 
 #include "serport.h"
 #include "tunif.h"
 
-static char* def_sdev = "/dev/ttyUSB0";
-static char* def_ipstr = "10.99.99.1";
-
-struct pbnet_config {
-    int baudrate;
-    int bpslimit;
-    int txqlen;
-    size_t blocksize;
-    char* sdev;
-    char* ipstr;
-    uint8_t netmask;
-};
-
-/* config defaults */
-static struct pbnet_config _config = {
-    .baudrate = 9600,
-    .bpslimit = 0,
-    .txqlen = 5,
-    .blocksize = 190,
-    .netmask = 24
-};
-
 #define PROGNAME "pbnet"
-#define INIT_DELAY 10000 /* usleep during the initial ping */
+
 #define MAX_BLOCKSIZE 256
 #define MTU 1500
+
+/* state timeouts */
+#define INIT_TIMEOUT  2 /* ACK interval during INIT state */
+#define TX_TIMEOUT    5 /* ACK timeout while sending blocks */
+#define RX_TIMEOUT    5 /* Block RX timeout */
+#define DEAD_TIMEOUT  5 /* Error recovery timeout */
+#define IDLE_TIMEOUT 10 /* idle timeout (READY state) for periodic keeplaives */
+#define MAX_RETRIES 5  /* max consecutive idle retries to mark state DEAD */
+
+/* dummy constants for V4/V6 */
 #define V4 4
 #define V6 6
 
-#define dprintf fprintf
+#define DBG_LV(lvl) (_config.debuglevel>=lvl)
+#define dprintf(lvl,...) if(DBG_LV(lvl)) fprintf(stderr,__VA_ARGS__);
 
+/* debug levels */
+enum {
+    PB_DNONE = 0,   /* none */
+    PB_DSTATS,      /* rx/tx packets only */
+    PB_DSTATE,      /* various state + control messages */
+    PB_DBLOCK,      /* block by block statistics */
+    PB_DBUF         /* buffer / block hex dump */
+};
+
+#define PB_DMAX PB_DBUF
+
+
+/* configuration holder */
+struct pbnet_config {
+    int baudrate;       /* serial port baud rate */
+    int delay;          /* TX per byte delay */
+    int txqlen;         /* TX queue length for the TUN interface */
+    size_t blocksize;   /* block size in bytes */
+    char* sdev;         /* serial device path */
+    char* ipstr;        /* TUN (host side) IP address string */
+    int debuglevel;     /* debug level (1..5, 0 = none) */
+    uint8_t netmask;    /* TUN net mask */
+    bool ckoffload;     /* checksum offload yes/no */
+    bool unreachables;  /* send IP unreachables when PB is down or unreachable */
+};
+
+/* config defaults */
+static char* def_sdev = "/dev/ttyUSB0";
+static char* def_ipstr = "10.99.99.1";
+
+static struct pbnet_config _config = {
+    .baudrate = 9600,
+    .delay = 1000,
+    .txqlen = 5,
+    .blocksize = 190,
+    .netmask = 24,
+    .debuglevel = PB_DNONE,
+    .ckoffload = false,
+    .unreachables = false
+};
+
+
+/* serial port state machine to handle flow control */
+enum {
+    PB_READY = 0x00, /* ready to receive / transmit */
+    PB_WACK  = 0x01, /* waiting for ACK */
+    PB_WRTX  = 0x02, /* waiting for RTX */
+    PB_INIT  = 0x03, /* waiting for PB to respond */
+    PB_DEAD  = 0x04, /* down / problem */
+    PB_PWRUP = 0x05, /* start up */
+    PB_MAXSTATE
+};
+
+/* state timeouts */
+static const int state_timeouts[PB_MAXSTATE] = {
+    [PB_READY] = IDLE_TIMEOUT,
+    [PB_WACK]  = TX_TIMEOUT,
+    [PB_WRTX]  = RX_TIMEOUT,
+    [PB_INIT]  = INIT_TIMEOUT,
+    [PB_DEAD]  = DEAD_TIMEOUT,
+    [PB_PWRUP] = 0
+};
+
+/* reserved control characters for flow control, ack, etc. */
+enum {
+    PB_SEP = 0x00,  /* packet separator */
+    PB_ACK = 0x01,  /* block acknowledgment / keepalive */
+    PB_STX = 0x02,  /* stop transmission (flow control) */
+    PB_RTX = 0x03,  /* resume transmission (flow control) */
+    PB_MCN          /* max control char = count of control chars */
+};
+
+/* character constants to send directly */
+static const char PBC_ACK = PB_ACK; /* only this one for now */
 
 /* simplified IP header, just to recognise v4/v6 */
 struct iphdr {
@@ -61,8 +125,11 @@ struct pbnet {
     /* file descriptors */
     int sp_fd;
     int tun_fd;
+    int timer_fd;
 
     uint8_t sp_state;                        /* current state */
+    int retries;                             /* number of (idle check) retries */
+    bool _first;                             /* first INIT state */
 
     /* incoming packet over serial */
     size_t sp_rx_bcount, sp_rx_oh;           /* block count and total overhead for incoming packet */
@@ -90,26 +157,8 @@ struct pbnet {
 
 };
 
-/* serial port state machine to handle flow control */
-enum {
-    PB_READY = 0x00, /* ready to receive / transmit */
-    PB_WACK  = 0x01, /* waiting for ACK */
-    PB_WRTX  = 0x02, /* waiting for RTX */
-    PB_INIT  = 0x03, /* waiting for PB to respond */
-    PB_DEAD  = 0x04  /* down / problem */
-};
+#define BOOLSTR(v) ((v)? "true" : "false")
 
-/* reserved control characters for flow control, ack, etc. */
-enum {
-    PB_SEP = 0x00,  /* packet separator */
-    PB_ACK = 0x01,  /* block acknowledgment / keepalive */
-    PB_STX = 0x02,  /* stop transmission (flow control) */
-    PB_RTX = 0x03,  /* resume transmission (flow control) */
-    PB_MCN          /* max control char = count of control chars */
-};
-
-/* character constants to send directly */
-static const char PBC_ACK = PB_ACK; /* only this one for now */
 /*
  * To send arbitrary data excluding reserved symbols, we use the escapeless encoding scheme:
  *
@@ -203,15 +252,14 @@ static void dec_block(const void *ibuf, void *obuf, const size_t blocklen) {
 /* send a block of data to the serial port, with an optional per-byte delay */
 static int sp_xmit(int fd, void* buf, size_t len) {
 
-    if(len == 1 || _config.bpslimit == 0) {
+    if(len == 1 || _config.delay == 0) {
         return write(fd, buf, len);
     } else {
 
         for(int i = 0; i < len; i++) {
             int ret = write(fd,buf++, 1);
             if(ret < 0) return ret;
-            int sld = 9E5 / _config.bpslimit;
-            while (usleep(sld) == EINTR) usleep(sld);
+            while (usleep(_config.delay) == EINTR) usleep(_config.delay);
         }
 
         return len;
@@ -219,21 +267,73 @@ static int sp_xmit(int fd, void* buf, size_t len) {
 
 }
 
-/* send an ACK and wait for response indefinitely, repeating every 256 INIT_DELAY */
-static void pb_ping(int fd) {
+/* restart timer */
+static void restart_timer(struct pbnet *pb) {
+    struct itimerspec it;
+    memset (&it, 0, sizeof(struct itimerspec));
+    /* if timeout > 0, set one-shot to timeout seconds */
+    if(state_timeouts[pb->sp_state] > 0) {
+        it.it_value.tv_sec = state_timeouts[pb->sp_state];
+        dprintf(PB_DBUF,"[       TMR] Timer set to %ld s \n",it.it_value.tv_sec);
+    }
+    /* otherwise all zeros, which stops the timer */
+    timerfd_settime(pb->timer_fd, 0, &it, NULL);
+}
 
-    unsigned char c;
-    uint8_t n = 0;
+/* set state and arm timer if necessary */
+static void sp_setstate(struct pbnet *pb, const int state) {
 
-    for(;;) {
-        if(n++ == 0) {
-             write(fd,&PBC_ACK,1);
-        }
-        usleep(INIT_DELAY);
-        if (sp_nread(fd) > 0 && read(fd,&c,1) == 1 && c == PB_ACK) break;
-    };
+    int last_state = pb->sp_state;
+    pb->sp_state = state;
+
+    switch(state) {
+        case PB_DEAD:
+                if(state != last_state) {
+                    dprintf(PB_DSTATE, "[     STATE] Now in PB_DEAD state\n");
+                }
+                break;
+        case PB_WACK:
+                if(state != last_state) {
+                    dprintf(PB_DSTATE, "[     STATE] Now in PB_WACK state\n");
+                }
+                break;
+        case PB_WRTX:
+                if(state != last_state) {
+                    dprintf(PB_DSTATE, "[     STATE] Now in PB_WRTX state\n");
+                }
+                break;
+        case PB_READY:
+                if(state != last_state) {
+                    dprintf(PB_DSTATE, "[     STATE] Now in PB_READY state\n");
+                }
+                break;
+        case PB_INIT:
+                write(pb->sp_fd,&PBC_ACK,1);
+                dprintf((!pb->_first ? PB_DNONE : PB_DSTATE), "[PBNET->SER] Sent ACK, waiting for response\n");
+                if(state != last_state) {
+                    dprintf(PB_DSTATE, "[     STATE] Now in PB_INIT state\n");
+                }
+    }
+
+    restart_timer(pb);
 
 }
+
+/* handle timer expiry */
+static void handle_timer(struct pbnet *pb) {
+
+    switch(pb->sp_state) {
+        case PB_READY:
+                dprintf(PB_DSTATE, "[     STATE] Idle timeout, liveness check\n");
+                sp_setstate(pb, PB_INIT);
+                break;
+        case PB_INIT:
+                pb->retries++;
+                dprintf(PB_DSTATE, "[     STATE] Init timeout, check #%d/%d\n", pb->retries, MAX_RETRIES);
+                sp_setstate(pb, PB_INIT);
+    }
+}
+
 
 /* set up serial port, wait for initial ACK, set up TUN interface */
 struct pbnet pbnet_init(const char* dev, const sp_params *params, const char* addr, const uint8_t mask) {
@@ -244,31 +344,27 @@ struct pbnet pbnet_init(const char* dev, const sp_params *params, const char* ad
     memset(&ret, 0, sizeof(ret));
     ret.sp_tx_pos = ret.sp_tx_buf;
 
-    dprintf(stderr, "[       TUN] Setting up tun interface with %s/%d... ", addr, mask);
+    dprintf(PB_DNONE, "[       TUN] Setting up tun interface with %s/%d... ", addr, mask);
 
     ret.tun_fd = tunif_open(addr, mask, _config.txqlen);
 
-    dprintf(stderr, "done.\n");
+    dprintf(PB_DNONE, "done\n");
 
     ret.sp_fd = sp_open(dev, params, SP_NONE);
 
     if(ret.sp_fd != -1) {
-        dprintf(stderr, "[       SER] Opened %s.\n",dev);
+        dprintf(PB_DNONE, "[       SER] Opened %s\n",dev);
     }
 
-    dprintf(stderr,"[       SER] Flushing buffer...");
-
+    dprintf(PB_DSTATE,"[       SER] Flushing buffer...");
     for(int i = 0; i<10; i++) {
         read(ret.sp_fd, buf, 1024);
     }
+    dprintf(PB_DSTATE, " done\n");
 
-    dprintf(stderr, " done.\n");
-    dprintf(stderr, "[PBNET->SER] PB-2000 are you there?\n");
+    ret.timer_fd = timerfd_create(CLOCK_MONOTONIC, 0);
 
-    pb_ping(ret.sp_fd);
-
-    dprintf(stderr, "[PBNET<-SER] They're here!\n");
-
+    sp_setstate(&ret, PB_INIT);
 
     return ret;
 }
@@ -311,10 +407,10 @@ static size_t pb_send_block(struct pbnet *pb) {
         pb->sp_tx_pos = pb->sp_tx_buf;
     }
 
-    dprintf(stderr, "[PBNET->SER] TX pkt #%d block #%d (%d B), awaiting ACK\n", pb->sp_tx_count + 1, pb->sp_tx_bcount, len + PB_MCN);
+    dprintf(PB_DBLOCK, "[PBNET->SER] TX pkt #%d block #%d (%d B), awaiting ACK\n", pb->sp_tx_count + 1, pb->sp_tx_bcount, len + PB_MCN);
 
     /* now we wait for ACK */
-    pb->sp_state = PB_WACK;
+    sp_setstate(pb, PB_WACK);
 
     return ret;
 
@@ -331,21 +427,21 @@ static void handle_tun(struct pbnet *pb, unsigned char* buf, size_t len) {
 
     struct iphdr *iph = (struct iphdr*) buf;
 
-    dprintf(stderr, "[PBNET<-TUN] Got %d bytes from host\n", len);
+    dprintf(PB_DSTATE, "[PBNET<-TUN] Got %d bytes from host\n", len);
 
     if ((iph->ver_ihl >> 4) != V4) {
-        dprintf(stderr,"[PBNET<-IP6] Got IPv6 packet from host, will not forward\n");
+        dprintf(PB_DSTATE,"[PBNET<-IP6] Got IPv6 packet from host, will not forward\n");
         return;
     } else {
-        dprintf(stderr,"[PBNET<-IP4] Queued %d-byte IPv4 packet for PB\n", len);
+        dprintf(PB_DSTATE,"[PBNET<-IP4] Queued %d-byte IPv4 packet for PB\n", len);
     }
-#ifdef PB_DUMP_BUF
-    dprintf(stderr,"[DEBUG DUMP] HST PK RAW: ");
-    for(int j = 0; j < len; j++) {
-        dprintf(stderr, "%02x ",buf[j]);
+    if(DBG_LV(PB_DBUF)) {
+        dprintf(PB_DBUF,"[DEBUG DUMP] HST PK RAW: ");
+        for(int j = 0; j < len; j++) {
+            dprintf(PB_DBUF, "%02x ",buf[j]);
+        }
+        dprintf(PB_DBUF, "\n");
     }
-    dprintf(stderr, "\n");
-#endif
     clock_gettime(CLOCK_MONOTONIC, &pb->sp_tx_pktts); 
     memcpy(pb->sp_tx_buf, buf, len);
     pb_send_block(pb);
@@ -378,17 +474,38 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
     struct timespec ack_ts, pkt_ts, block_ts, ib_ts;
     double pktdur, ackdur, bps, blockdur;
 
-#ifdef PB_DUMP_BUF
-    dprintf(stderr,"[DEBUG DUMP] SER BF RAW: ");
-    for(int j = 0; j < len; j++) {
-        dprintf(stderr, "%02x ",buf[j]);
+    if(len <= 0) {
+        return;
     }
-    dprintf(stderr, "\n");
-#endif
+
+    if(DBG_LV(PB_DBUF)) {
+        dprintf(PB_DBUF,"[DEBUG DUMP] SER BF RAW: ");
+        for(int j = 0; j < len; j++) {
+            dprintf(PB_DBUF, "%02x ",buf[j]);
+        }
+        dprintf(PB_DBUF, "\n");
+    }
+
+    if(pb->sp_state == PB_READY) {
+        restart_timer(pb);
+    }
 
     for(int i = 0; i < len; i++) {
 
         c = buf[i];
+
+        /* in INIT state we discard data until we see an ACK */
+        if(pb->sp_state == PB_INIT) {
+            if(c == PB_ACK) {
+                if(!pb->_first) {
+                    dprintf(PB_DNONE, "[PBNET<-SER] Got ACK, PB-2000 responding\n");
+                }
+                pb->_first = true;
+                pb->retries = 0;
+                sp_setstate(pb, PB_READY);
+            }
+            return;
+        }
 
         /* received a control character */
         if ( c < PB_MCN) {
@@ -404,34 +521,34 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
                                         ackdur = ts_ms(&ack_ts);
                                         pktdur = ts_ms(&pkt_ts);
                                         bps = (pb->sp_tx_plen * 1000.0) / pktdur;
-                                        dprintf(stderr, "[PBNET<-SER] Got ACK (%.03f ms)\n", ackdur);
-                                        dprintf(stderr, "[PBNET->SER] TX pkt #%d done, total o/h %d/%d (%.03f%%), took %.03f ms, %.0f Bps mean\n",
+                                        dprintf(PB_DBLOCK, "[PBNET<-SER] Got ACK (%.03f ms)\n", ackdur);
+                                        dprintf(PB_DSTATS, "[PBNET->SER] TX pkt #%d done, total o/h %d/%d (%.0f%%), took %.03f ms, %.0f Bps mean\n",
                                                             pb->sp_tx_count, pb->sp_tx_oh, pb->sp_tx_plen, 100.0*((pb->sp_tx_oh + 0.0) / pb->sp_tx_plen),
                                                             pktdur, bps);
                                         /* IMPORTANT: automatically pause TX to allow PB to service the packet */
-                                        pb->sp_state = PB_WRTX;
+                                        sp_setstate(pb, PB_WRTX);
                                     } else {
-                                        dprintf(stderr, "[PBNET<-SER] Got ACK (%.03f ms), next block\n", ack_ts.tv_nsec / 1000000.0);
-                                        pb->sp_state = PB_READY;
+                                        dprintf(PB_DBLOCK, "[PBNET<-SER] Got ACK (%.03f ms), next block\n", ack_ts.tv_nsec / 1000000.0);
+                                        sp_setstate(pb, PB_READY);
                                         pb_send_block(pb);
                                     }
 
                              } else {
-                                dprintf(stderr, "[PBNET<-SER] Got stray ACK, ignoring\n");
+                                dprintf(PB_DSTATE, "[PBNET<-SER] Got stray ACK, ignoring\n");
                              }
                              break;
                 case PB_STX: if(pb->sp_state != PB_WRTX) {
-                                dprintf(stderr, "[PBNET<-SER] Got STX, pausing TX\n");
-                                pb->sp_state = PB_WRTX;
+                                dprintf(PB_DSTATE, "[PBNET<-SER] Got STX, pausing TX\n");
+                                sp_setstate(pb, PB_WRTX);
                              } else {
-                                dprintf(stderr, "[PBNET<-SER] Got STX, already paused\n");
+                                dprintf(PB_DSTATE, "[PBNET<-SER] Got STX, already paused\n");
                              }
                              break;
                 case PB_RTX: if(pb->sp_state == PB_WRTX) {
-                                dprintf(stderr, "[PBNET<-SER] Got RTX, resuming TX\n");
-                                pb->sp_state = PB_READY;
+                                dprintf(PB_DSTATE, "[PBNET<-SER] Got RTX, resuming TX\n");
+                                sp_setstate(pb, PB_READY);
                              } else {
-                                dprintf(stderr, "[PBNET<-SER] Got RTX, already transmitting, ignoring\n");
+                                dprintf(PB_DSTATE, "[PBNET<-SER] Got RTX, already transmitting, ignoring\n");
                              }
                              break;
             }
@@ -461,19 +578,19 @@ blockdone:
                     pb->sp_rx_oh += PB_MCN;
                     pb->sp_rx_bcount++;
 
-                    dprintf(stderr, "[PBNET<-SER] RX pkt #%d block #%d (%d B), took %.03f ms", pb->sp_rx_count + 1, pb->sp_rx_bcount, pb->sp_rx_blen, blockdur);
+                    dprintf(PB_DBLOCK, "[PBNET<-SER] RX pkt #%d block #%d (%d B), took %.03f ms", pb->sp_rx_count + 1, pb->sp_rx_bcount, pb->sp_rx_blen, blockdur);
                     if(pb->sp_rx_bcount > 1) {
-                        dprintf(stderr,", inter-block %.03f ms", pb->ibdur);
+                        dprintf(PB_DBLOCK,", inter-block %.03f ms", pb->ibdur);
                     }
-                    dprintf(stderr, "\n");
+                    dprintf(PB_DBLOCK, "\n");
 
-#ifdef PB_DUMP_BUF
-                    dprintf(stderr,"[DEBUG DUMP] SER BL RAW: ");
-                    for(int j = 0; j < pb->sp_rx_blen; j++) {
-                        dprintf(stderr, "%02x ",pb->sp_rx_bbuf[j]);
+                    if(DBG_LV(PB_DBUF)) {
+                        dprintf(PB_DBUF,"[DEBUG DUMP] SER BL RAW: ");
+                        for(int j = 0; j < pb->sp_rx_blen; j++) {
+                            dprintf(PB_DBUF, "%02x ",pb->sp_rx_bbuf[j]);
+                        }
+                        dprintf(PB_DBUF, "\n");
                     }
-                    dprintf(stderr, "\n");
-#endif
                     dec_block(pb->sp_rx_bbuf, pb->sp_rx_pbuf + pb->sp_rx_plen, pb->sp_rx_blen);
                     pb->sp_rx_plen += (pb->sp_rx_blen - PB_MCN);
                 }
@@ -482,17 +599,17 @@ blockdone:
                     ts_diff(&pkt_ts, &pb->sp_rx_pktts);
                     pktdur = ts_ms(&pkt_ts);
                     bps = (pb->sp_rx_plen * 1000.0) / pktdur;
-                    dprintf(stderr, "[PBNET<-SER] Got SEP, end of packet\n");
-                    dprintf(stderr, "[PBNET<-SER] Rx pkt #%d done, total o/h %d/%d (%.02f%%),took %.03f ms,  %.0f Bps mean\n", pb->sp_rx_count + 1,
+                    dprintf(PB_DSTATE, "[PBNET<-SER] Got SEP, end of packet\n");
+                    dprintf(PB_DSTATS, "[PBNET<-SER] Rx pkt #%d done, total o/h %d/%d (%.0f%%), took %.03f ms, %.0f Bps mean\n", pb->sp_rx_count + 1,
                             pb->sp_rx_oh, pb->sp_rx_plen,100.0*((pb->sp_rx_oh + 0.0) / pb->sp_rx_plen) ,  pktdur, bps);
-                    dprintf(stderr, "[PBNET->TUN] Forwarding %d-byte packet to host\n", pb->sp_rx_plen);
-#ifdef PB_DUMP_BUF
-                    dprintf(stderr,"[DEBUG DUMP] SER PK DEC: ");
-                    for(int j = 0; j < pb->sp_rx_plen; j++) {
-                        dprintf(stderr, "%02x ",pb->sp_rx_pbuf[j]);
+                    dprintf(PB_DSTATE, "[PBNET->TUN] Forwarding %d-byte packet to host\n", pb->sp_rx_plen);
+                    if(DBG_LV(PB_DBUF)) {
+                        dprintf(PB_DBUF,"[DEBUG DUMP] SER PK DEC: ");
+                        for(int j = 0; j < pb->sp_rx_plen; j++) {
+                            dprintf(PB_DBUF, "%02x ",pb->sp_rx_pbuf[j]);
+                        }
+                        dprintf(PB_DBUF, "\n");
                     }
-                    dprintf(stderr, "\n");
-#endif
                     write(pb->tun_fd, pb->sp_rx_pbuf, pb->sp_rx_plen);
                     pb->sp_rx_plen = 0; pb->sp_rx_bcount = 0; pb->sp_rx_count++; pb->sp_rx_oh = 0; 
                 }
@@ -505,21 +622,26 @@ blockdone:
 }
 
 static void usage() {
-    dprintf(stderr,"usage: "PROGNAME" [-d STRING ] [-b NUM] [-B NUM] [-l NUM]\n"\
-                   "             [-a STRING ] [-m NUM] [-q NUM] [-h]\n\n"\
+    dprintf(PB_DNONE,"usage: "PROGNAME" [-d STRING ] [-b NUM] [-B NUM] [-l NUM]\n"\
+                   "             [-a STRING ] [-m NUM] [-q NUM] [-D NUM]\n"\
+                   "             [-o] [-u] [-f] [-h]\n\n"\
                    "         -d: serial device to attach to (default:%s)\n"\
                    "         -b: baud rate (300..9600, default:%d)\n"\
                    "         -B: block size (16..256, default:%d)\n"\
-                   "         -l: serial port TX rate limit in Bps/cps\n"\
-                   "             (0:no limit, default:%d)\n"\
+                   "         -l: serial TX per byte delay in microseconds\n"\
+                   "             (0.., 1 ms = 1000, 0:send at once, default:%d)\n"\
                    "         -a: IPv4 address on host side (default:%s)\n"\
                    "         -m: netmask (0..31, default:%d)\n"\
                    "         -q: TUN interface TX queue length (0..)\n"\
-                   "             default:%d, 0:OS default)\n"\
+                   "             (0:OS default, default:%d) \n"\
+                   "         -D: debug level (0..%d, 0:none, default:%d)\n"\
+                   "         -o: enable checksum offload\n"\
+                   "         -u: send ICMP unreachables on behalf of PB\n"\
+                   "         -f: run in foreground\n"\
                    "         -h: this here help\n"\
                    "\n",
-                    _config.sdev, _config.baudrate,_config.blocksize,_config.bpslimit,
-                    _config.ipstr,_config.netmask,_config.txqlen
+                    _config.sdev, _config.baudrate,_config.blocksize,_config.delay,
+                    _config.ipstr,_config.netmask,_config.txqlen,PB_DMAX,_config.debuglevel
     );
 
 }
@@ -528,7 +650,7 @@ static int parse_config(int argc, char ** argv) {
 
     int c, n;
 
-    while( (c=getopt(argc,argv, "hd:b:B:l:a:m:q:")) != -1) {
+    while( (c=getopt(argc,argv, "oufhd:b:B:l:a:m:q:D:")) != -1) {
         switch(c) {
             case 'h': 
                         usage();
@@ -539,7 +661,7 @@ static int parse_config(int argc, char ** argv) {
             case 'b':
                         n = atoi(optarg);
                         if(n < 300 || n > 9600) {
-                            dprintf(stderr,PROGNAME": baud rate out of range (300..9600)\n");
+                            dprintf(PB_DNONE,PROGNAME": baud rate out of range (300..9600)\n");
                             return -2;
                         }
                         _config.baudrate = n;
@@ -547,7 +669,7 @@ static int parse_config(int argc, char ** argv) {
             case 'B':
                         n = atoi(optarg);
                         if(n < 16 || n > 256) {
-                            dprintf(stderr,PROGNAME": block size out of range (16..256)\n");
+                            dprintf(PB_DNONE,PROGNAME": block size out of range (16..256)\n");
                             return -2;
                         }
                         _config.blocksize = n;
@@ -555,10 +677,10 @@ static int parse_config(int argc, char ** argv) {
             case 'l':
                         n = atoi(optarg);
                         if(n < 0) {
-                            dprintf(stderr,PROGNAME": rate limit out of range (0..)\n");
+                            dprintf(PB_DNONE,PROGNAME": delay out of range (0..)\n");
                             return -2;
                         }
-                        _config.bpslimit = n;
+                        _config.delay = n;
                         break;
             case 'a':
                         _config.ipstr = optarg;
@@ -566,7 +688,7 @@ static int parse_config(int argc, char ** argv) {
             case 'm':
                         n = atoi(optarg);
                         if(n < 0 || n>31) {
-                            dprintf(stderr,PROGNAME": netmask out of range (0..31)\n");
+                            dprintf(PB_DNONE,PROGNAME": netmask out of range (0..31)\n");
                             return -2;
                         }
                         _config.netmask = n;
@@ -574,13 +696,29 @@ static int parse_config(int argc, char ** argv) {
             case 'q':
                         n = atoi(optarg);
                         if(n < 0) {
-                            dprintf(stderr,PROGNAME": TX queue length out of range (0..)\n");
+                            dprintf(PB_DNONE,PROGNAME": TX queue length out of range (0..)\n");
                             return -2;
                         }
                         _config.txqlen = n;
                         break;
+            case 'D':
+                        n = atoi(optarg);
+                        if(n < 0 || n > PB_DMAX) {
+                            dprintf(PB_DNONE,PROGNAME": debug level out of range (0..%d)\n", PB_DMAX);
+                            return -2;
+                        }
+                        _config.debuglevel = n;
+                        break;
+
+            case 'o':
+                        _config.ckoffload = true;
+                        break;
+            case 'u':
+                        _config.unreachables = true;
+                        break;
+
             default:
-                        dprintf(stderr,PROGNAME": try -h for list of options\n");
+                        dprintf(PB_DNONE,PROGNAME": try -h for list of options\n");
                         return -3;
         }
 
@@ -623,17 +761,24 @@ int main (int argc, char **argv) {
     struct pbnet pb = pbnet_init(_config.sdev, &params, _config.ipstr, _config.netmask);
 
     /* don't worry Bob, I'll fix these later (not) */
-    if (pb.sp_fd==-1) {
-        dprintf(stderr, "[       ERR] Could not set up serial port\n");
+    if (pb.sp_fd== -1) {
+        dprintf(PB_DNONE, "[       ERR] Could not set up serial port\n");
         return -1;
     }
+
     if (pb.tun_fd == -1) {
-        dprintf(stderr, "[       ERR] Could not set up tunnel interface\n");
+        dprintf(PB_DNONE, "[       ERR] Could not set up tunnel interface\n");
+        return -1;
+    }
+
+    if (pb.timer_fd == -1) {
+        dprintf(PB_DNONE, "[       ERR] Could not set up timer, cannot continue\n");
         return -1;
     }
 
     /* 1970 called and wants its file descriptors back... */
     maxfd = (pb.sp_fd > pb.tun_fd) ? pb.sp_fd : pb.tun_fd;
+    maxfd = (maxfd > pb.timer_fd) ? maxfd : pb.timer_fd;
     maxfd++;
 
     /*
@@ -644,6 +789,7 @@ int main (int argc, char **argv) {
 
         FD_ZERO(&fds);
         FD_SET(pb.sp_fd, &fds);
+        FD_SET(pb.timer_fd, &fds);
 
         /* receive packets from host unless PB requested to pause TX or waiting for ACK */
         if(pb.sp_state == PB_READY) {
@@ -658,7 +804,7 @@ int main (int argc, char **argv) {
 
         /* yeah, need some more safisticashun here */
         if(res < 0) {
-            dprintf(stderr, "[       ERR] Select() error\n");
+            dprintf(PB_DNONE, "[       ERR] Select() error!\n");
             ret = -1;
             break;
         }
@@ -675,6 +821,11 @@ int main (int argc, char **argv) {
             len = read(pb.tun_fd, nbuf, MTU);
             if(len < 0) continue;
             handle_tun(&pb, nbuf, len);
+        }
+
+        if(FD_ISSET(pb.timer_fd, &fds)) {
+            dprintf(PB_DBUF,"[       TMR] Timer out\n");
+            handle_timer(&pb);
         }
 
     }
