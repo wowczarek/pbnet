@@ -448,6 +448,12 @@ static void handle_tun(struct pbnet *pb, unsigned char* buf, size_t len) {
 
 }
 
+
+/* send an ICMP dest unreachable in response to packet */
+static void serve_unreachable(struct pbnet *pb, unsigned char* buf, size_t len) {
+/* TODO */
+}
+
 /* timestamp delta */
 static void ts_diff(struct timespec *a, struct timespec *b) {
 
@@ -497,9 +503,7 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
         /* in INIT state we discard data until we see an ACK */
         if(pb->sp_state == PB_INIT) {
             if(c == PB_ACK) {
-                if(!pb->_first) {
-                    dprintf(PB_DNONE, "[PBNET<-SER] Got ACK, PB-2000 responding\n");
-                }
+                dprintf((pb->_first ? PB_DSTATE : PB_DNONE), "[PBNET<-SER] Got ACK, PB-2000 responding\n");
                 pb->_first = true;
                 pb->retries = 0;
                 sp_setstate(pb, PB_READY);
@@ -792,7 +796,7 @@ int main (int argc, char **argv) {
         FD_SET(pb.timer_fd, &fds);
 
         /* receive packets from host unless PB requested to pause TX or waiting for ACK */
-        if(pb.sp_state == PB_READY) {
+        if((pb.sp_state == PB_READY) || _config.unreachables) {
             FD_SET(pb.tun_fd, &fds);
         }
 
@@ -820,7 +824,13 @@ int main (int argc, char **argv) {
         if(pb.sp_state == PB_READY && FD_ISSET(pb.tun_fd, &fds)) {
             len = read(pb.tun_fd, nbuf, MTU);
             if(len < 0) continue;
-            handle_tun(&pb, nbuf, len);
+            if(pb.sp_state == PB_READY) {
+                handle_tun(&pb, nbuf, len);
+            } else { 
+             /* if we got here at all and not PB_READY, then it's only to send an unreachable */
+                serve_unreachable(&pb, nbuf, len);
+            }
+
         }
 
         if(FD_ISSET(pb.timer_fd, &fds)) {

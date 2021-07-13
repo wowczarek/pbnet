@@ -1,4 +1,10 @@
-#!/bin/sh
+#!/bin/bash
+
+# Copyright (c) 2021, Wojciech Owczarek
+# All rights reserved
+# BSD 2-clause licence - see LICENSE in the top directory
+
+# a crude .pas preprocessor to include any {$I xxx.pas} files into Pascal source
 
 if [ "${1}x" = "x" ]; then echo "$0: no source file given"; exit 1; fi
 if [ "${2}x" = "x" ]; then echo "$0: no destination file given"; exit 1; fi
