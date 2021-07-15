@@ -8,12 +8,14 @@
 program pbnet;
 uses crt;
 const 
+    { global settings }
+    cfg_file='pbnet.cfg';
+    def_baud = '7'; { 9600 }
     { protocol properties }
     pb_mtu = 1500;
-    pb_mcn = $04; { max control character = number of reserved characters }
+    pb_mcn = 4; { max control character = number of reserved characters }
     pb_mc = pb_mcn - 1; { mcn minus 1 (so we can use > not >=) }
-    blocksize = 190; { block size }
-    bsize = blocksize - pb_mcn; { maximum payload in a single block }
+    def_blocksize = 224; { block size }
     { result constants }
     pb_ok =    0;
     pb_tmout = 1;
@@ -22,10 +24,10 @@ const
     pb_corrupt = 4;
     pb_mtuerr = 5;
     { control characters }
-    pb_sep = $00;
-    pb_ack = $01;
-    pb_stx = $02;
-    pb_rtx = $03;
+    pb_sep = 0;
+    pb_ack = 1;
+    pb_stx = 2;
+    pb_rtx = 3;
     { IP protocol numbers }
     ipproto_zero = 0;
     ipproto_icmp = 1;
@@ -48,15 +50,16 @@ const
     {$ENDIF}
     timer_no = 2;
 type
-    { a socket descriptor }
-    socket = record
-        proto: byte;
-        state: byte;
-        sport: word;
-        dport: word;
-    end;
     { an IP address - better this than a longint, really }
     ipaddr = array [0..3] of byte;
+    { a socket descriptor }
+    socket = record
+        proto: byte; { protocol }
+        state: byte; { state (for TCP) }
+        lport: word; { local port: source port for PB->world, destination port for world->PB }
+        rport: word; { remore port}
+        raddr: ipaddr; { remote address }
+    end;
     { IPv4 header }
     ip_hdr = record
         ver_ihl: byte;
@@ -125,16 +128,159 @@ var
     cntpad:string=' 00000';
     lastx,lasty: byte;
 {$ENDIF}
-    my_ip:ipaddr=(0,0,0,0); { my own ip address }
+    baud: char = def_baud;
+    my_ip: ipaddr=(10,99,99,2); { my own ip address }
+    dns_ip: ipaddr = (8,8,8,8);
+    blocksize: byte = def_blocksize;
+    checksums: boolean = true;
+    bsize: byte;
     res: byte; { general result capture variable }
     { counters }
     rxcnt:word=0;
     txcnt:word=0;
-
  { ---- user variables here - the above will go into a unit ---- }
     ipkt: ippkt;
-    ip: ipaddr = (10,99,99,2);
-    dnsip: ipaddr = (172,16,100,1);
+
+{ ======= Config file related routines }
+
+{ trim [^a-Az-Z0-9] from both ends of a string }
+function trim(var s:string):string;
+var 
+  i,l,spos,epos,tl:byte;
+  c: char;
+  r: string[64];
+  label st;
+  label en;
+begin
+  l:=length(s); trim := s;
+  if (l<=0) or (l >= 64) then exit;
+  { search ltr until an alnum character is found }
+  for i:=1 to l do begin
+    c:=upcase(s[i]);
+    if ((c > '0') and (c < '9')) or ((c > 'A') and (c < 'Z')) then begin
+      spos:=i; goto st;
+    end;
+  end;
+  { none found: exit }
+  exit;
+  st:
+  { search rtl until an alnum character is found }
+  for i:=l downto 1 do begin
+    c:=upcase(s[i]);
+    if ((c > '0') and (c < '9')) or ((c > 'A') and (c < 'Z')) then begin
+      epos:=i; goto en;
+    end;
+  end;
+  exit;
+  en:
+  { set string result to a substring spos...epos }
+  tl:=epos-spos+1; byte(r[0]):=tl; move(s[spos],r[1],tl); trim:=r;
+end;
+
+{ parse a byte from string, return 0 when all parsed }
+function parse_byte(var s: string; var b: byte):byte;
+var p:byte;
+begin
+    val(s,b,p);
+    parse_byte := p;
+end;
+
+{ parse an IP address from string into ipaddr - no range checks! returns 0 if all 4 octets parsed }
+function parse_ip(var v: string; var ip:ipaddr):byte;
+var p,p1:byte;
+    s:string;
+    n,np:byte;
+    i,j:byte;
+begin
+    parse_ip:=1;
+    i:=0; j:=0;
+    p:=pos('.',v); p1:=1;
+    while (p > 0) and (i<4) do begin
+      p:=pos('.',v,p1);
+      if p = 0 then begin
+        if i<3 then exit;
+        s:=copy(v,p1,64);
+      end else begin
+        s:=copy(v,p1,p-p1); p1:=p+1;
+      end;
+        inc(i);
+        if parse_byte(s,ip[j]) = 0 then inc(j);
+    end;
+    if j = 4 then parse_ip := 0;
+end;
+
+{ process a key,value config entry }
+procedure parsekv(var k:string; var v:string);
+var ip:ipaddr; n:byte;
+begin
+
+  if k='ip' then begin
+    if parse_ip(v,ip)=0 then my_ip := ip;
+  end;
+
+  if k='dns' then begin
+    if parse_ip(v,ip)=0 then dns_ip := ip;
+  end;
+
+  if k='blocksize' then begin
+    if (parse_byte(v,n) = 0) and (n>16) then blocksize := n;
+  end;
+
+  if k='checksums' then begin
+        if upcase(v[1])='T' then checksums:=true;
+        if upcase(v[1])='Y' then checksums:=true;
+        if upcase(v[1])='F' then checksums:=false;
+        if upcase(v[1])='N' then checksums:=false;
+  end;
+
+  if k='baud' then begin
+        if v='9600' then baud='7';
+        if v='4800' then baud='6';
+        if v='2400' then baud='5';
+        if v='1200' then baud='4';
+        if v='600' then baud='3';
+        if v='300' then baud='2';
+        if v='150' then baud='1';
+        if v='75' then baud='0';
+  end;
+end;
+
+{$I-}
+{ load config file and parse settings, returns 1 on any failure }
+function readconfig : byte;
+var
+ i,l,p:byte;
+ f:text;
+ s,k,v:string;
+label cont;
+label en;
+begin
+  readconfig := 1;
+  assign(f,cfg_file);
+  if ioresult<>0 then goto en;
+  reset(f);
+  { read file line by line }
+  while not eof(f) do begin
+    readln(f,s);
+    if ioresult<>0 then goto en;
+    l := length(s);
+    if l<2 then goto cont;
+    { split into k,v on '=' }
+    p:=pos('=',s);
+    if p > 64 then goto en;
+    if p = 0 then goto cont;
+    k:=copy(s,0,p-1); v:=copy(s,p+1,64);
+    k:=trim(k); v:=trim(v);
+    parsekv(k,v);
+  cont:
+  end;
+  readconfig := 0;
+en:
+  close(f);
+end;
+{$I+}
+
+{ ========== other routines follow ======== }
 
 {$IFDEF PBNET_GUI}
 { update counter display }
@@ -332,7 +478,7 @@ var
 tmpaddr:ipaddr;
 begin
     with pkt do begin
-        if ip.proto = ipproto_icmp then begin
+        if (longint(ip.dst)=longint(my_ip)) and (ip.proto = ipproto_icmp) then begin
             if icmp.mtype = icmp_mtype_echo then begin
                 icmp.mtype := icmp_mtype_echoreply;
                 { swap src and dst address }
@@ -348,32 +494,23 @@ begin
     end;
 end;
 
-procedure pkt_init(mip: ipaddr);
-{$IFDEF PBNET_GUI}
-var
-    nch: gc = (32,48,56,48,32,0 ,223,207,199,207,223,0, 8,24,56,24,8,0 ,247,231,199,231,247,0, 0,0,26,203,26,0);
-    nch1:gc1= (0,0,0,0,192,192, 0,0,0,0,24,24, 0,0,0,0,3,3);
-{$ENDIF}
+procedure pkt_init;
+var r:byte;
+comstr:string;
 begin
-    my_ip := ip;
-    rxcnt :=0;
-    txcnt :=0;
-{$IFDEF PBNET_GUI}
-    ch := nch;
-    ch1 :=nch1;
-    gotoxy(1,1); write ('               ');
-    gotoxy(1,1); write (my_ip[0],'.',my_ip[1],'.',my_ip[2],'.',my_ip[3]);
-    gotoxy(rxcnt_pos,1); write(#1,'00000',#3,'00000 ',#5);
-    gotoxy(1,2);
-{$ENDIF}
-    assign(f,'COM:7N81NNN.NN'); { open serial port }
+    r:=readconfig;
+    bsize := blocksize - pb_mcn;
+    rxcnt := 0;
+    txcnt := 0;
+    comstr:='COM:7N81NNN.NN';
+    comstr[5] := baud;
+    assign(f,comstr); { open serial port }
     rewrite(f,1); reset(f,1); { set 1-byte block size for reading and writing }
-
 end;
 
 begin
 
-    pkt_init(ip);
+    pkt_init;
 
     writeln('Receiving (any key to stop)');
 
