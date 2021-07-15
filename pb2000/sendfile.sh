@@ -26,18 +26,20 @@ if [ "${3}x" != "x" ]; then bps=$3; fi
 # who says we can't do float in Bash!
 if [ $bps -gt 0 ]; then delay=`printf "0.%03d" $(( 1000 / $bps ))`; fi
 
-# set desired speed and make sure we don't have mean==time==0, otherwise writes will end prematurely
+# set desired speed and make sure we don't have min==time==0, otherwise writes will end prematurely
+# TODO: baud rate
+
 stty -F $dev min 1 time 0 speed 9600 >/dev/null 2>&1
 
-# "unix2dos": first replace any \r\n with \n, then back to \r\n to ensures no mixed newline types or doubles
+# "unix2dos": first replace any \r\n with \n, then back to \r\n to ensure no mixed newline types or doubles
 function u2d {
     sed -e ':a' -e 'N' -e '$!ba' -e 's/\r\n/\n/g' -e 's/\n/\r\n/g'
 }
 
-# far from a real minify, but remove any comments apart from preprocessor {$xxx},
-# any pre/post indentation and any empty newlines. we are not removing newlines
+# Far from a real minify, but remove any comments apart from preprocessor {$xxx},
+# any pre/post indentation and any empty newlines. We are not removing newlines
 # completely (which could gain 2 bytes per line), because DL-Pascal has issues
-# with very long inline() strings.
+# with some very long strings like the inline() calls.
 function pminify {
     sed 's/{[^$].*}//g' | sed 's/^[ \t]*//g' | sed '/^$/d' | sed 's/[ \t]*$//g'
 }
@@ -51,7 +53,7 @@ if [ $fs -gt $cfs ]; then str="$str, reduced to $cfs"; else str="$str, could not
 
 sbps=""
 if [ $bps -gt 0 ]; then sbps=" at ~$bps Bps"; fi
-echo "Sending file '$1' to $dev ($str)$sbps..."
+echo "Sending file '$1' to $dev ($str)$sbps:"
 
 pdone=0
 pdone1=-1
@@ -60,14 +62,16 @@ cat $1 | pminify | u2d | {
     # read byte after byte
     while read -N 1 -d '' c; do
         cnt=$(( $cnt + 1))
-        # old trick:  round down percentage to full tens...
+        # the old trick: round the percentage down to full tens...
         pdone=$(( 10 * ((10 * $cnt) / $cfs) ))
         # ...and only print if ticked one up, hence initialised pdone1 to less than zero
         if [ "$pdone" -gt "$pdone1" ]; then echo -n $pdone%...;fi >&2
 
+        # byte out
         echo -n "$c"
-        if [ $bps -gt 0 ]; then
 
+        # extra delay
+        if [ $bps -gt 0 ]; then
             # delay option 1: coproc reading from an stdin that is guaranteed not to receive anything
             # { coproc read -t $delay; wait $!; } >/dev/null 2>&1
 
