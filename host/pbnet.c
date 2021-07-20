@@ -112,7 +112,7 @@ enum {
 };
 
 /* character constants to send directly */
-static const char PBC_ACK = PB_ACK; /* only this one for now */
+static const unsigned char PBC_ACK = PB_ACK;
 
 /* simplified IP header, just to recognise v4/v6 */
 struct iphdr {
@@ -308,8 +308,8 @@ static void sp_setstate(struct pbnet *pb, const int state) {
                 }
                 break;
         case PB_INIT:
-                write(pb->sp_fd,&PBC_ACK,1);
                 dprintf((!pb->_first ? PB_DNONE : PB_DSTATE), "[PBNET->SER] Sent ACK, waiting for response\n");
+                write(pb->sp_fd,&PBC_ACK,1);
                 if(state != last_state) {
                     dprintf(PB_DSTATE, "[     STATE] Now in PB_INIT state\n");
                 }
@@ -500,14 +500,15 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
 
         c = buf[i];
 
-        /* in INIT state we discard data until we see an ACK */
+        /* in INIT state we discard data until we see an ACK (provoked) or an RTX (spontaneous) */
         if(pb->sp_state == PB_INIT) {
-            if(c == PB_ACK) {
-                dprintf((pb->_first ? PB_DSTATE : PB_DNONE), "[PBNET<-SER] Got ACK, PB-2000 responding\n");
+            if(c == PB_RTX || c == PB_ACK) {
+                dprintf((pb->_first ? PB_DSTATE : PB_DNONE), "[PBNET<-SER] Got %s, PB-2000 ready\n", (c==PB_RTX) ? "RTX" : "ACK");
                 pb->_first = true;
                 pb->retries = 0;
                 sp_setstate(pb, PB_READY);
             }
+
             return;
         }
 
