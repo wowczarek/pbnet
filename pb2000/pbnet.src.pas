@@ -22,6 +22,7 @@ const
     pb_corrupt=4;
     pb_mtuerr=5;
     pb_unexp=6;
+    pb_err=7;
     { control characters }
     pb_sep=0;
     pb_ack=1;
@@ -46,8 +47,10 @@ const
     ephem_minport=16385; { lowest ephemeral port }
     ephem_maxrand=65000 - ephem_minport; { random count for ephemeral port }
     { other internal constants }
+    default_ttl=64;
     rs232_baddr=$08e2;
     timer_no=2;
+    kv_maxlen=127; { max key/value string length }
 type
     { an IP address - better this than a longint, really }
     ipaddr=array [0..3] of byte;
@@ -121,6 +124,7 @@ var
     my_ip:ipaddr=(10,99,99,2); { my own ip address }
     dns_ip:ipaddr=(8,8,8,8);
     addr_any:ipaddr=(0,0,0,0);
+    search_domain:string='';
     blocksize:byte=def_blocksize;
     checksums:boolean=true;
     bsize:byte;
@@ -132,21 +136,21 @@ var
 
 { ======= Config file related routines }
 
-{ trim [^a-Az-Z0-9] from both ends of a string }
+{ trim [^a-Az-Z0-9-] from both ends of a string }
 function trim(var s:string):string;
 var 
   i,l,spos,epos,tl:byte;
   c:char;
-  r:string[64];
+  r:string;
   label st;
   label en;
 begin
   l:=length(s);trim:=s;
-  if (l<=0) or (l >= 64) then exit;
+  if (l<=0) or (l >= kv_maxlen) then exit;
   { search ltr until an alnum character is found }
   for i:=1 to l do begin
     c:=upcase(s[i]);
-    if ((c>'0') and (c<'9')) or ((c>'A') and (c<'Z')) then begin
+    if ((c>='0') and (c<='9')) or ((c>='A') and (c<='Z')) or (c='-') then begin
       spos:=i;goto st;
     end;
   end;
@@ -156,7 +160,7 @@ begin
   { search rtl until an alnum character is found }
   for i:=l downto 1 do begin
     c:=upcase(s[i]);
-    if ((c>'0') and (c<'9')) or ((c>'A') and (c<'Z')) then begin
+    if ((c>'0') and (c<'9')) or ((c>'A') and (c<'Z')) or (c='-') then begin
       epos:=i;goto en;
     end;
   end;
@@ -188,7 +192,7 @@ begin
       p:=pos('.',v,p1);
       if p=0 then begin
         if i<3 then exit;
-        s:=copy(v,p1,64);
+        s:=copy(v,p1,kv_maxlen);
       end else begin
         s:=copy(v,p1,p-p1);p1:=p+1;
       end;
@@ -232,6 +236,9 @@ begin
         if v='150' then baud:='1';
         if v='75' then baud:='0';
   end;
+
+ if k='search' then search_domain:=v;
+
 end;
 
 {$I-}
@@ -256,9 +263,9 @@ begin
     if l<2 then goto cont;
     { split into k,v on '=' }
     p:=pos('=',s);
-    if p>64 then goto en;
+    if p>kv_maxlen then goto en;
     if p=0 then goto cont;
-    k:=copy(s,0,p-1);v:=copy(s,p+1,64);
+    k:=copy(s,0,p-1);v:=copy(s,p+1,kv_maxlen);
     k:=trim(k);v:=trim(v);
     parsekv(k,v);
   cont:
@@ -268,7 +275,14 @@ en:
   close(f);
 end;
 {$I+}
+
 { ========== other routines follow ======== }
+
+procedure print_ipaddr(var a:ipaddr);
+begin
+    write(a[0],'.',a[1],'.',a[2],'.',a[3]);
+end;
+
 { RFC1071 checksum, as used in IP header checksum, ICMP header checksum, UDP checksum, etc. }
 function pkt_checksum(var data:array of byte;pos:word;len:word):word;
 begin
@@ -324,7 +338,7 @@ begin
         end;
 
         left:=plen+ip_hdrlen;
-        if len>pb_mtu then exit; { don't send a packet that's too large }
+        if left>pb_mtu then exit; { don't send a packet that's too large }
         ip.len:=swap(left);
         { cheksum is zero while computing the header checksum }
         ip.csum:=0;
@@ -425,9 +439,13 @@ end;
 { set basic field values in a new packet }
 procedure pkt_prime(var pkt:ippkt);
 begin
-    { ver/ihl 45, ttl 64 }
-    pkt.data := ($45,$00,$00,$00,$00,$00,$00,$00,64);
-    pkt.ip.id:=swap(ip_id);
+    with pkt.ip do begin
+        ver_ihl:=$45; { ver 4, ihl 5 dwords }
+        dscp_ecn:=0; { clear }
+        fl_foff:=$0040; { set DF flag (swapped byte order) }
+        ttl:=default_ttl;
+        id:=swap(ip_id);
+    end;
     inc(ip_id);
 end;
 
@@ -506,6 +524,151 @@ begin
     pkt_send(pkt);
 end;
 
+{ clean up a hostname string and append search domain if no dots }
+function hname_cleanup(var shost:string): boolean;
+begin
+    hname_cleanup:=false;
+    if (length(shost)=0) or (shost='.') then exit;
+    shost:=trim(shost);
+    if length(shost)=0 then exit;
+    if pos('.',shost) = 0 then shost:=shost+'.'+search_domain;
+    if length(shost)=0 then exit;
+    hname_cleanup:=true;
+end;
+{ resolve shost into ip, using pkt packet }
+function dns_resolve(shost:string;var ip:ipaddr;var pkt:ippkt;timeout: word; retries: byte):byte;
+var
+id:word;
+res: byte;
+off:byte;
+len,ps,ps1:byte;
+sock: socket;
+qdcount:word=0;
+ancount:word=0;
+rdlength:word=0;
+label retry;
+label rxretry;
+label got_in_a;
+begin
+
+retry:
+    off := 12; { past DNS header }
+    dns_resolve:=pb_err;
+    id:=ip_id;
+    {too short or whatever}
+    if not hname_cleanup(shost) then exit;
+
+    { prepare the socket }
+    sock.lport:=port_any;
+    sock.rport:=53;
+    sock.remote:=dns_ip;
+
+    with pkt.udp do begin
+    { part 1: populate DNS header }
+        { bytes 0..1 = ID, copy from IP id, could be whatever }
+        payload[0]:=hi(id);
+        payload[1]:=lo(id);
+        { zeroise the rest of the header, set RD }
+        fillchar(payload[3],9,0); payload[2]:=$01; payload[5]:=$01;
+        { result is: }
+            {  XXXX ID }
+            {  0200 QR=0,OPCODE=0,AA=0,TC=0,RD=1,RA=0,Z=0,RCODE=0 }
+            {  0001 QDCOUNT=1 }
+            {  0000 0000 0000 ANCOUNT=0,NSCOUNT=0,ARCOUNT=0 }
+
+    { part 2: populate query section }
+        { place every token/subdomain in the packet as a label (length byte+string) }
+        ps1:=1;
+        repeat
+            ps:=pos('.',shost,ps1);
+            if ps=0 then ps:=length(shost)+1;
+            len:=ps-ps1;
+            payload[off]:=len; inc(off);
+            move(shost[ps1],payload[off],len);
+            inc(off,len); ps1:=ps+1;
+        until ps>length(shost);
+        { add null label (root) + two zero words }
+        fillchar(payload[off],5,0);
+        { set query to IN A }
+        inc(off,2); payload[off]:=1; { QTYPE=0x0001=A}
+        inc(off,2); payload[off]:=1; { QCLASS=0x0001=IN }
+        inc(off);
+    end;
+    { send the query }
+    pkt.l4_len:=off;
+    udp_sendto(pkt,sock);
+rxretry:
+    if retries>0 then dec(retries);
+    res:=udp_recvfrom(pkt,sock,timeout);
+    if (res<>pb_ok) and (res<>pb_intr) and (retries>0) then begin
+        pkt_ready;
+        goto retry;
+    end;
+    if res <> pb_ok then begin
+        dns_resolve := res;
+        exit;
+    end;
+
+    { we have a response, hopefully it's what we asked for }
+    with pkt.udp do begin
+        { different ID, not what we wanted, or QR bit not set, not a response }
+        if (payload[0] <> hi(id)) or (payload[1]<>lo(id)) or (payload[2] < $80) then begin
+            if retries>0 then begin
+                pkt_ready;
+                goto rxretry;
+            end;
+            exit;
+        end;
+        { TC flag, truncated message }
+        if (payload[2] and $04) > 0 then exit;
+        { check RCODE, TODO: return DNS RCODE, needs internal error codes to be negative }
+        if (payload[3] and $0f) > 0 then exit;
+        { get QDCOUNT and ANCOUNT }
+        qdcount:=(payload[4] shl 8)+payload[5];
+        ancount:=(payload[6] shl 8)+payload[7];
+        { no answers! }
+        if ancount = 0 then exit;
+        off:=12; { skip header }
+        { skip QD/query section: first find the zero label }
+        while qdcount>0 do begin
+            if off>pkt.l4_len then exit;
+            { wait for a null or for a pointer }
+            if (payload[off]=0) or (payload[off]>191) then begin
+                if (payload[off]>191) then inc(off); { if it's a pointer, move past pointer identifier }
+                inc(off); { move past the zero }
+                { then skip past type(2)+class(2) }
+                inc(off,4); 
+                dec(qdcount);
+            end else inc(off); { move forward }
+        end;
+        { now we should be in the AN section, but there could be CNAMEs - keep skipping until we find IN A }
+        while ancount>0 do begin
+            if off>pkt.l4_len then exit;
+            { wait for a null or a pointer }
+            if (payload[off]=0) or (payload[off]>191) then begin
+                if (payload[off]>191) then inc(off); { if it's a pointer, move past pointer identifier }
+                inc(off); { move past the zero or pointer offset }
+                if (payload[off]=0) and (payload[off+1]=1) and (payload[off+2]=0) and (payload[off+3]=1) then goto got_in_a;
+                { then skip past type(2)+class(2)+ttl(4) }
+                inc(off,8); 
+                { get RDLENGTH, skip past RDLENGTH and RDATA (of RDLENGTH length) }
+                rdlength:=(payload[off] shl 8)+payload[off+1];
+                inc(off,rdlength+2);
+                dec(ancount);
+            end else inc(off); { move forward }
+        end;
+    { nothing found }
+    exit;
+
+got_in_a:
+    { skip to RDATA }
+    inc(off,10);
+    move(payload[off],ip,4);
+    dns_resolve:=pb_ok;
+    end;
+
+end;
+
 { shut down and clean up }
 procedure pbn_shutdown;
 begin
@@ -532,20 +695,7 @@ begin
     pkt_ready; { send RTX }
 end;
 
-procedure icmp_test;
-var pkt:ippkt;
-begin
-    pbn_init;
-    repeat
-        res:=pkt_get(pkt, 300);
-        if res=pb_ok then begin
-            echo_respond(pkt);
-        end;
-        pkt_ready;
-    until res=pb_intr;
-    pbn_shutdown;
-end;
-
+{ UDP echo test }
 procedure udp_test;
 var
 pkt:ippkt;
@@ -567,9 +717,25 @@ begin
     pbn_shutdown;
 end;
 
+procedure dns_test;
+var
+pkt:ippkt;
+r:byte;
+ip:ipaddr;
+begin
+    pbn_init;
+    if (paramcount=0) then exit;
+    writeln('looking up ',paramstr(1),'...');
+    r:=dns_resolve(paramstr(1),ip,pkt,300,3);
+    if r=pb_ok then begin
+        write(paramstr(1),' is: '); print_ipaddr(ip);
+        writeln;
+    end else writeln('error, returned: ',r);
+    pbn_shutdown;
+end;
+
 begin
     writeln('Receiving (any key to stop)');
-    udp_test;
-    clrscr;
+    dns_test;
 end.
 
