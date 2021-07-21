@@ -73,7 +73,7 @@ static struct pbnet_config _config = {
     .baudrate = 9600,
     .delay = 1000,
     .txqlen = 5,
-    .blocksize = 190,
+    .blocksize = 224,
     .netmask = 24,
     .debuglevel = PB_DNONE,
     .ckoffload = false,
@@ -86,9 +86,10 @@ enum {
     PB_READY = 0x00, /* ready to receive / transmit */
     PB_WACK  = 0x01, /* waiting for ACK */
     PB_WRTX  = 0x02, /* waiting for RTX */
-    PB_INIT  = 0x03, /* waiting for PB to respond */
-    PB_DEAD  = 0x04, /* down / problem */
-    PB_PWRUP = 0x05, /* start up */
+    PB_WBLOCK = 0x03, /* waiting for end of block or end of packet */
+    PB_INIT  = 0x04, /* waiting for PB to respond */
+    PB_DEAD  = 0x05, /* down / problem */
+    PB_PWRUP = 0x06, /* start up */
     PB_MAXSTATE
 };
 
@@ -97,6 +98,7 @@ static const int state_timeouts[PB_MAXSTATE] = {
     [PB_READY] = IDLE_TIMEOUT,
     [PB_WACK]  = TX_TIMEOUT,
     [PB_WRTX]  = RX_TIMEOUT,
+    [PB_WBLOCK]  = RX_TIMEOUT,
     [PB_INIT]  = INIT_TIMEOUT,
     [PB_DEAD]  = DEAD_TIMEOUT,
     [PB_PWRUP] = 0
@@ -302,12 +304,19 @@ static void sp_setstate(struct pbnet *pb, const int state) {
                     dprintf(PB_DSTATE, "[     STATE] Now in PB_WRTX state\n");
                 }
                 break;
+        case PB_WBLOCK:
+                if(state != last_state) {
+                    dprintf(PB_DSTATE, "[     STATE] Now in PB_WBLOCK state\n");
+                }
+                break;
         case PB_READY:
                 if(state != last_state) {
                     dprintf(PB_DSTATE, "[     STATE] Now in PB_READY state\n");
                 }
                 break;
         case PB_INIT:
+                /* clean up RX state */
+                pb->sp_rx_plen = 0; pb->sp_rx_bcount = 0; pb->sp_rx_oh = 0; pb->sp_rx_blen = 0;
                 dprintf((!pb->_first ? PB_DNONE : PB_DSTATE), "[PBNET->SER] Sent ACK, waiting for response\n");
                 write(pb->sp_fd,&PBC_ACK,1);
                 if(state != last_state) {
@@ -323,6 +332,20 @@ static void sp_setstate(struct pbnet *pb, const int state) {
 static void handle_timer(struct pbnet *pb) {
 
     switch(pb->sp_state) {
+        case PB_WBLOCK:
+                dprintf(PB_DSTATE, "[PBNET<-SER] Packet RX timeout, abandoned RX pkt #%d block #%d\n",
+                            pb->sp_rx_count + 1, pb->sp_rx_bcount);
+                sp_setstate(pb, PB_INIT);
+                break;
+        case PB_WRTX:
+                dprintf(PB_DSTATE, "[PBNET<-SER] RTX timeout, assuming PB-2000 dead\n");
+                sp_setstate(pb, PB_INIT);
+                break;
+        case PB_WACK:
+                dprintf(PB_DSTATE, "[PBNET<-SER] ACK timeout, abandoned TX pkt #%d block #%d\n",
+                            pb->sp_tx_count + 1, pb->sp_tx_bcount);
+                sp_setstate(pb, PB_INIT);
+                break;
         case PB_READY:
                 dprintf(PB_DSTATE, "[     STATE] Idle timeout, liveness check\n");
                 sp_setstate(pb, PB_INIT);
@@ -332,6 +355,7 @@ static void handle_timer(struct pbnet *pb) {
                 dprintf(PB_DSTATE, "[     STATE] Init timeout, check #%d/%d\n", pb->retries, MAX_RETRIES);
                 sp_setstate(pb, PB_INIT);
     }
+
 }
 
 
@@ -534,7 +558,6 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
                                         sp_setstate(pb, PB_WRTX);
                                     } else {
                                         dprintf(PB_DBLOCK, "[PBNET<-SER] Got ACK (%.03f ms), next block\n", ack_ts.tv_nsec / 1000000.0);
-                                        sp_setstate(pb, PB_READY);
                                         pb_send_block(pb);
                                     }
 
@@ -560,6 +583,8 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
         /* received data */
         } else {
             if(pb->sp_rx_blen == 0) {
+                /* handle block timeouts */
+                sp_setstate(pb, PB_WBLOCK);
                 clock_gettime(CLOCK_MONOTONIC, &pb->sp_rx_blockts); 
                 if(pb->sp_rx_bcount == 0) {
                     pb->sp_rx_oh = 0;
@@ -599,7 +624,7 @@ blockdone:
                     dec_block(pb->sp_rx_bbuf, pb->sp_rx_pbuf + pb->sp_rx_plen, pb->sp_rx_blen);
                     pb->sp_rx_plen += (pb->sp_rx_blen - PB_MCN);
                 }
-                if(c == PB_SEP) {
+                if(c == PB_SEP && pb->sp_rx_plen > 0) {
                     pb->sp_rx_oh++;
                     ts_diff(&pkt_ts, &pb->sp_rx_pktts);
                     pktdur = ts_ms(&pkt_ts);
@@ -617,6 +642,7 @@ blockdone:
                     }
                     write(pb->tun_fd, pb->sp_rx_pbuf, pb->sp_rx_plen);
                     pb->sp_rx_plen = 0; pb->sp_rx_bcount = 0; pb->sp_rx_count++; pb->sp_rx_oh = 0; 
+                    sp_setstate(pb, PB_READY);
                 }
                 pb->sp_rx_blen = 0;
             }
