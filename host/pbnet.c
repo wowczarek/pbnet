@@ -25,11 +25,11 @@
 #define MTU 1500
 
 /* state timeouts */
-#define INIT_TIMEOUT  2 /* ACK interval during INIT state */
+#define IDLE_TIMEOUT  2 /* ACK interval during INIT state */
 #define TX_TIMEOUT    5 /* ACK timeout while sending blocks */
 #define RX_TIMEOUT    5 /* Block RX timeout */
 #define DEAD_TIMEOUT  5 /* Error recovery timeout */
-#define IDLE_TIMEOUT 10 /* idle timeout (READY state) for periodic keeplaives */
+#define READY_TIMEOUT 10 /* idle timeout (READY state) for periodic keeplaives */
 #define MAX_RETRIES 5  /* max consecutive idle retries to mark state DEAD */
 
 /* dummy constants for V4/V6 */
@@ -87,7 +87,7 @@ enum {
     PB_WACK  = 0x01, /* waiting for ACK */
     PB_WRTX  = 0x02, /* waiting for RTX */
     PB_WBLOCK = 0x03, /* waiting for end of block or end of packet */
-    PB_INIT  = 0x04, /* waiting for PB to respond */
+    PB_IDLE  = 0x04, /* waiting for PB to respond */
     PB_DEAD  = 0x05, /* down / problem */
     PB_PWRUP = 0x06, /* start up */
     PB_MAXSTATE
@@ -95,11 +95,11 @@ enum {
 
 /* state timeouts */
 static const int state_timeouts[PB_MAXSTATE] = {
-    [PB_READY] = IDLE_TIMEOUT,
+    [PB_READY] = READY_TIMEOUT,
     [PB_WACK]  = TX_TIMEOUT,
     [PB_WRTX]  = RX_TIMEOUT,
     [PB_WBLOCK]  = RX_TIMEOUT,
-    [PB_INIT]  = INIT_TIMEOUT,
+    [PB_IDLE]  = IDLE_TIMEOUT,
     [PB_DEAD]  = DEAD_TIMEOUT,
     [PB_PWRUP] = 0
 };
@@ -131,7 +131,6 @@ struct pbnet {
 
     uint8_t sp_state;                        /* current state */
     int retries;                             /* number of (idle check) retries */
-    bool _first;                             /* first INIT state */
 
     /* incoming packet over serial */
     size_t sp_rx_bcount, sp_rx_oh;           /* block count and total overhead for incoming packet */
@@ -314,13 +313,13 @@ static void sp_setstate(struct pbnet *pb, const int state) {
                     dprintf(PB_DSTATE, "[     STATE] Now in PB_READY state\n");
                 }
                 break;
-        case PB_INIT:
+        case PB_IDLE:
                 /* clean up RX state */
                 pb->sp_rx_plen = 0; pb->sp_rx_bcount = 0; pb->sp_rx_oh = 0; pb->sp_rx_blen = 0;
-                dprintf((!pb->_first ? PB_DNONE : PB_DSTATE), "[PBNET->SER] Sent ACK, waiting for response\n");
-                write(pb->sp_fd,&PBC_ACK,1);
                 if(state != last_state) {
-                    dprintf(PB_DSTATE, "[     STATE] Now in PB_INIT state\n");
+                    dprintf(PB_DSTATE, "[     STATE] Now in PB_IDLE state\n");
+                    write(pb->sp_fd,&PBC_ACK,1);
+                    dprintf(PB_DSTATE, "[PBNET->SER] ACK probe sent\n");
                 }
     }
 
@@ -335,25 +334,25 @@ static void handle_timer(struct pbnet *pb) {
         case PB_WBLOCK:
                 dprintf(PB_DSTATE, "[PBNET<-SER] Packet RX timeout, abandoned RX pkt #%d block #%d\n",
                             pb->sp_rx_count + 1, pb->sp_rx_bcount);
-                sp_setstate(pb, PB_INIT);
+                sp_setstate(pb, PB_IDLE);
                 break;
         case PB_WRTX:
-                dprintf(PB_DSTATE, "[PBNET<-SER] RTX timeout, assuming PB-2000 dead\n");
-                sp_setstate(pb, PB_INIT);
+                dprintf(PB_DSTATE, "[PBNET<-SER] RTX timeout, PB-2000 idle\n");
+                sp_setstate(pb, PB_IDLE);
                 break;
         case PB_WACK:
                 dprintf(PB_DSTATE, "[PBNET<-SER] ACK timeout, abandoned TX pkt #%d block #%d\n",
                             pb->sp_tx_count + 1, pb->sp_tx_bcount);
-                sp_setstate(pb, PB_INIT);
+                sp_setstate(pb, PB_IDLE);
                 break;
         case PB_READY:
-                dprintf(PB_DSTATE, "[     STATE] Idle timeout, liveness check\n");
-                sp_setstate(pb, PB_INIT);
+                dprintf(PB_DSTATE, "[     STATE] READY timeout, liveness check\n");
+                sp_setstate(pb, PB_IDLE);
                 break;
-        case PB_INIT:
+        case PB_IDLE:
                 pb->retries++;
-                dprintf(PB_DSTATE, "[     STATE] Init timeout, check #%d/%d\n", pb->retries, MAX_RETRIES);
-                sp_setstate(pb, PB_INIT);
+                dprintf(PB_DBUF, "[     STATE] IDLE timeout\n");
+                sp_setstate(pb, PB_IDLE);
     }
 
 }
@@ -388,7 +387,7 @@ struct pbnet pbnet_init(const char* dev, const sp_params *params, const char* ad
 
     ret.timer_fd = timerfd_create(CLOCK_MONOTONIC, 0);
 
-    sp_setstate(&ret, PB_INIT);
+    sp_setstate(&ret, PB_IDLE);
 
     return ret;
 }
@@ -516,7 +515,7 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
         dprintf(PB_DBUF, "\n");
     }
 
-    if(pb->sp_state == PB_READY) {
+    if(pb->sp_state == PB_READY || pb->sp_state==PB_IDLE) {
         restart_timer(pb);
     }
 
@@ -524,19 +523,7 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
 
         c = buf[i];
 
-        /* in INIT state we discard data until we see an ACK (provoked) or an RTX (spontaneous) */
-        if(pb->sp_state == PB_INIT) {
-            if(c == PB_RTX || c == PB_ACK) {
-                dprintf((pb->_first ? PB_DSTATE : PB_DNONE), "[PBNET<-SER] Got %s, PB-2000 ready\n", (c==PB_RTX) ? "RTX" : "ACK");
-                pb->_first = true;
-                pb->retries = 0;
-                sp_setstate(pb, PB_READY);
-            }
-
-            return;
-        }
-
-        /* received a control character */
+        /* received a control byte */
         if ( c < PB_MCN) {
              switch(c) {
                 case PB_SEP: /*i++; while(i<len && buf[i] == PB_SEP) i++;*/ goto blockdone; /* end of packet: complete current block and process it */
@@ -561,7 +548,11 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
                                         pb_send_block(pb);
                                     }
 
-                             } else {
+                             } else if(pb->sp_state == PB_IDLE) {
+                                dprintf(PB_DSTATE, "[PBNET<-SER] Got ACK, PB-2000 ready to receive\n");
+                                pb->retries = 0;
+                                sp_setstate(pb, PB_READY);
+                            } else {
                                 dprintf(PB_DSTATE, "[PBNET<-SER] Got stray ACK, ignoring\n");
                              }
                              break;
@@ -575,6 +566,10 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
                 case PB_RTX: if(pb->sp_state == PB_WRTX) {
                                 dprintf(PB_DSTATE, "[PBNET<-SER] Got RTX, resuming TX\n");
                                 sp_setstate(pb, PB_READY);
+                             } else if(pb->sp_state == PB_IDLE) {
+                                dprintf(PB_DSTATE, "[PBNET<-SER] Got RTX, PB-2000 ready to receive\n");
+                                pb->retries = 0;
+                                sp_setstate(pb, PB_READY);
                              } else {
                                 dprintf(PB_DSTATE, "[PBNET<-SER] Got RTX, already transmitting, ignoring\n");
                              }
@@ -583,7 +578,7 @@ static void handle_sp(struct pbnet *pb, unsigned char* buf, size_t len) {
         /* received data */
         } else {
             if(pb->sp_rx_blen == 0) {
-                /* handle block timeouts */
+                dprintf(PB_DSTATE, "[PBNET<-SER] Got data, waiting for a packet\n");
                 sp_setstate(pb, PB_WBLOCK);
                 clock_gettime(CLOCK_MONOTONIC, &pb->sp_rx_blockts); 
                 if(pb->sp_rx_bcount == 0) {
