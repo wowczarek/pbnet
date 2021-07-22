@@ -4,7 +4,11 @@
 
 - Packet encoding and decoding: done
 - Rewritten enc_block, dec_block and pkt_checksum to ASM: done
-- For now, only an ICMP echo responder
+- Respond to ICMP echo: done
+- Configuration file support on PB-2000: done
+- UDP sockets: done
+- DNS resolver (IN A only): done
+- Compiled binary so far: ~10 kB
 
 ## What is PBNET?
 
@@ -14,7 +18,7 @@ PBNET is an attempt at creating something resembling a semi working IP stack for
 
 ### For the what?
 
-Casio PB-2000 (2000C / 2000AI) is an 8-bit programmable pocket computer made and sold by Casio in the late 1980s, sporting a QWERTY + numeric keyboard, 192x32 dot matrix LCD and up to 64 kB RAM (32 kB + RP-33 RAM pack). The RAM is shared between system area, heap, stack and file storage, and is battery-backed. The PB-2000 has a calculator mode and a menu-driven file manager. The CPU is a custom Hitachi HD61700, same as used in another pocket Casio computer, the PB-1000. What makes the PB-2000C unique is that it supports a number of programming environments, unlike most similar devices of this era that out of the box only supported BASIC. The PB-2000 has a built-in ROM with a K&R C (yes, C!) interpreter - that's the PB-2000C - or one with LISP (really) - that's the PB-2000AI. But that's not where it ends - it also has a ROM card slot, and ROM cards were available with BASIC (OM-53B) and Prolog (OM-52P). C was also available as a ROM card for the AI model. The PB-2000 can interface with the rest of the world via the FA-7 interface (RS-232 serial, parallel port, tape audio in/out) or the MD-100, which is the latter, but replaces the tape interface with a 3.5" floppy disk drive. Unlike other 8-bits you might have heard of like Commodore, Atari , ZX-Spectrum and such like, it does not have a TV output and no fancy scan line juggling circuitry, nor does it have a sound chip - only a simple piezo buzzer out of which you can PWM some chirps. But it's pocketable and runs on batteries. It was meant for engineering and academic use.
+Casio PB-2000 (PB-2000C / AI-1000) is an 8-bit programmable pocket computer made and sold by Casio in the late 1980s, sporting a QWERTY + numeric keyboard, 192x32 dot matrix LCD and up to 64 kB RAM (32 kB + RP-33 RAM pack). The RAM is shared between system area, heap, stack and file storage, and is battery-backed. The PB-2000 has a calculator mode and a menu-driven file manager. The CPU is a custom Hitachi HD61700, same as used in another pocket Casio computer, the PB-1000. What makes the PB-2000C unique is that it supports a number of programming environments, unlike most similar devices of this era that out of the box only supported BASIC. The PB-2000 has a built-in ROM with a K&R C (yes, C!) interpreter - that's the PB-2000C - or one with LISP (really) - that's the AI-1000 that was only sold in Japan. But that's not where it ends - it also has a ROM card slot, and ROM cards were available with BASIC (OM-53B) and Prolog (OM-52P). C was also available as a ROM card for the AI model. The PB-2000 can interface with the rest of the world via the FA-7 interface (RS-232 serial, parallel port, tape audio in/out) or the MD-100, which is the latter, but replaces the tape interface with a 3.5" floppy disk drive. Unlike other 8-bits you might have heard of like Commodore, Atari , ZX-Spectrum and such like, it does not have a TV output and no fancy scan line juggling circuitry, nor does it have a sound chip - only a simple piezo buzzer out of which you can PWM some chirps. But it's pocketable and runs on batteries. It was meant for engineering and academic use.
 
 ### So it's a programmable calculator?
 
@@ -77,7 +81,7 @@ With the core routines (block encoding, decoding and checksums) written in HD617
 
 ## API and protocol support
 
-PBNET supports (will support) ICMP, UDP and TCP, comes with a PING (ICMP echo) sender and responder, and a very basic DNS resolver library, which only handles IN A records.
+PBNET supports (will support) ICMP, UDP and TCP, and has a very basic DNS resolver, which only handles IN A records.
 
 ## Future plans
 

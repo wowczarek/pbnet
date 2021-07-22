@@ -1,38 +1,37 @@
 General:
 
-- Add explicit RXPROGRESS state (ends on rx SEP)
-- Implement timeouts (RXPROGRESS, WACK, WRTX) on host side
+- Add explicit WBLOCK state (ends on rx SEP)
+- x Implement timeouts (WBLOCK, WACK, WRTX) on host side
 - Implement error handling on host side
 - Implement timeouts and error handling on PB-2000 side (block timeout at least)
-- Implement debug flags / log levels
-- Make IP address configurable on either end
+- x Implement debug flags / log levels
+- x Make IP address configurable on either end
 
 PB-2000C IP stack:
-
+- add timeout to pkt_send, host should somehow confirm packet receipt
 +/- - implement UI elements (local IP, blinking TX, RX, IC, UD, TC, counters, timeout, processing) 
 - x for errors
 - make pbnet linux host robust: send unreachables when PB not available. wait for ping using state machine, not loop
 - restart / keep restarting if usb unavailable
 - BRK, not any key, to stop
-- add timeout parameter to pkt_get
+x add timeout parameter to pkt_get
 - handle RX checksum checking, broken pakets
 - handle unreachables, TTL, etc.
-- discard when dst != me
+x discard when dst != me
 
-- move L4 headers into separate types
-- handle MTU exceeded
-- handle/set DF flag
+x move L4 headers into separate types
+x handle MTU exceeded
+x handle/set DF flag
 - discard fragments, verify checksums, etc
-- discard IPv6
+x discard IPv6
 
-- decide where to store packet length
+x decide where to store packet length
 
 - checksum offloading on host side
 - send unreachables when PB not reachable
 
-- implement UDP
-
-- implement DNS
+x implement UDP
+x implement DNS
 
 - implement TFTP
 
