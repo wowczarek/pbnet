@@ -604,16 +604,17 @@ function dns_resolve(shost:string;var rip:ipaddr;var pkt:ippkt;timeout: word; re
 var
 id:word;
 res: shortint;
+anssect: boolean=false;
 off:byte;
 len,ps,ps1:byte;
 sock: socket;
-qdc:word=0;
-anc:word=0;
+rcount:word=0;
 rdlength:word=0;
 label retry;
 label rxretry;
 label got_in_a;
 label ezpz;
+label dosect;
 begin
     { we don't support reverse lookups - if we got an IP, just parse that. Easy peasy. }
     if parse_ip(shost,rip)=0 then goto ezpz;
@@ -667,8 +668,13 @@ rxretry:
     pkt_ready; { tell the host that we can receive stuff now }
     { wait for a response packet }
     res:=udp_recv(pkt,sock,timeout);
-    { look for more packets on error, unless e_intr }
-    if (res<>e_ok) and (res<>e_intr) and (retries>0) then goto retry;
+    { retry on error, unless e_intr }
+    if (res<>e_ok) and (res<>e_intr) and (retries>0) then begin
+        { if it's not a response to what we want, try receiving again }
+        if res = e_unxp then goto rxretry;
+        { otherwise request again, but not if it's a DNS error that's > e_ok }
+        if res < e_ok then goto retry;
+    end;
     if res <> e_ok then begin
         dns_resolve := res;
         exit;
@@ -688,43 +694,43 @@ rxretry:
             dns_resolve:=payload[3] and $0f;
             exit;
         end;
-        { get QDCOUNT and ANCOUNT }
-        qdc:=(payload[4] shl 8)+payload[5];
-        anc:=(payload[6] shl 8)+payload[7];
-        if anc = 0 then exit; { there's no answer for the chemical dancers }
+        { check ANCOUNT first, no point going further if there are no answers }
+        rcount:=(payload[6] shl 8)+payload[7];
+        if rcount = 0 then exit; { there's no answer for the chemical dancers }
+        { get QDCOUNT }
+        rcount:=(payload[4] shl 8)+payload[5];
         off:=12; { skip header }
-        { skip QD/query section: first find the zero label }
-        while qdc>0 do begin
-            if off>pkt.l4_len then exit;
+dosect:
+        { skip QD section or search the AN section: first find the zero label }
+        while rcount>0 do begin
+            if off>pkt.l4_len then exit; { no peeking!!1! }
             { wait for a null or for a pointer }
             if (payload[off]=0) or (payload[off]>191) then begin
                 if (payload[off]>191) then inc(off); { if it's a pointer, move past pointer marker }
                 inc(off); { move past the zero or pointer offset }
-                { then skip past type(2)+class(2) }
-                inc(off,4); 
-                dec(qdc);
+                { AN section }
+                if anssect then begin
+                    { do we have an IN A ? }
+                    if (payload[off]=0) and (payload[off+1]=1) and (payload[off+2]=0) and (payload[off+3]=1) then goto got_in_a;
+                    { otherwise skip past type(2)+class(2)+ttl(4) }
+                    inc(off,8); 
+                    { get RDLENGTH, skip past RDLENGTH and RDATA (of RDLENGTH length) }
+                    rdlength:=(payload[off] shl 8)+payload[off+1];
+                    inc(off,rdlength+2);
+                { QD section: skip past type(2)+class(2) }
+                end else inc(off,4); 
+                dec(rcount);
             end else inc(off); { move forward }
         end;
-        { now we should be in the AN section, but there could be CNAMEs - just keep skipping until we find IN A }
-        while anc>0 do begin
-            if off>pkt.l4_len then exit;
-            { wait for a null or a pointer }
-            if (payload[off]=0) or (payload[off]>191) then begin
-                if (payload[off]>191) then inc(off); { if it's a pointer, move past pointer marker }
-                inc(off); { move past the zero or pointer offset }
-                { we have an IN A ! }
-                if (payload[off]=0) and (payload[off+1]=1) and (payload[off+2]=0) and (payload[off+3]=1) then goto got_in_a;
-                { otherwise skip past type(2)+class(2)+ttl(4) }
-                inc(off,8); 
-                { get RDLENGTH, skip past RDLENGTH and RDATA (of RDLENGTH length) }
-                rdlength:=(payload[off] shl 8)+payload[off+1];
-                inc(off,rdlength+2);
-                dec(anc);
-            end else inc(off); { move forward }
+        { now switch to AN }
+        if not anssect then begin
+            anssect:=true;
+            { ANCOUNT }
+            rcount:=(payload[6] shl 8)+payload[7];
+            goto dosect;
         end;
-    { nothing found }
-    exit;
-
+        { nothing found }
+        exit;
 got_in_a:
     { skip to RDATA }
     inc(off,10);
