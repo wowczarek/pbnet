@@ -625,7 +625,7 @@ blockdone:
                     pktdur = ts_ms(&pkt_ts);
                     bps = (pb->sp_rx_plen * 1000.0) / pktdur;
                     dprintf(PB_DSTATE, "[PBNET<-SER] Got SEP, end of packet\n");
-                    dprintf(PB_DSTATS, "[PBNET<-SER] Rx pkt #%d done, total o/h %d/%d (%.0f%%), took %.03f ms, %.0f Bps mean\n", pb->sp_rx_count + 1,
+                    dprintf(PB_DSTATS, "[PBNET<-SER] RX pkt #%d done, total o/h %d/%d (%.0f%%), took %.03f ms, %.0f Bps mean\n", pb->sp_rx_count + 1,
                             pb->sp_rx_oh, pb->sp_rx_plen,100.0*((pb->sp_rx_oh + 0.0) / pb->sp_rx_plen) ,  pktdur, bps);
                     dprintf(PB_DSTATE, "[PBNET->TUN] Forwarding %d-byte packet to host\n", pb->sp_rx_plen);
                     if(DBG_LV(PB_DBUF)) {
