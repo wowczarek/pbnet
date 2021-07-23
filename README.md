@@ -89,7 +89,9 @@ PBNET supports (will support) ICMP, UDP and TCP, and has a very basic DNS resolv
 
 ## Building and installing PBNET
 
-Download the source on a Linux host, type "make". This will build the host daemon, pbnet/pbnet, compile the assembly files and include into pb2000/pbnet.src.pas to make pb2000/pbnet.pas.
+Download the source on a Linux host, type "make". This will build the host daemon, host/pbnet, compile the assembly files and include into pb2000/pbnet.src.pas to make pb2000/pbnet.pas.
+
+** A proper installation procedure to follow once this is made into a unit, etc. **
 
 ### Acknowledgments
 
