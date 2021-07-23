@@ -1,6 +1,7 @@
 General:
 
-- Add explicit WBLOCK state (ends on rx SEP)
+- reconsider config file and strerr to save space!
+- x Add explicit WBLOCK state (ends on rx SEP)
 - x Implement timeouts (WBLOCK, WACK, WRTX) on host side
 - Implement error handling on host side
 - Implement timeouts and error handling on PB-2000 side (block timeout at least)
