@@ -4,7 +4,7 @@
 
 {$D-}
 program pbnet;
-uses crt;
+uses crt; { only for timerxxx functions }
 const 
     { global settings }
     cfg_file='pbnet.cfg';
@@ -595,11 +595,7 @@ begin
     if length(shost)=0 then exit;
     if pos('.',shost) = 0 then shost:=shost+'.'+search_domain;
     if length(shost)=0 then exit;
-    for i:=1 to length(shost) do
-        if not (alnum(shost[i]) or (shost[i]='.')) then begin
-        writeln(shost[i]);
-        exit;
-        end;
+    for i:=1 to length(shost) do if not (alnum(shost[i]) or (shost[i]='.')) then exit;
     hname_cleanup:=true;
 end;
 { resolve shost into ip, using pkt packet }
