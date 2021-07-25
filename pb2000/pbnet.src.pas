@@ -41,8 +41,8 @@ const
     de_formerr=1;de_servfail=2;de_nxdomain=3;de_notimp=4;de_refused=5;de_notzone=9;
     { other socket constants }
     port_any=0;
-    ephem_minport=16384; { lowest ephemeral port }
-    ephem_maxrand=65000 - ephem_minport; { random count for ephemeral port }
+    ephem_minport=49152; { lowest ephemeral port, IANA }
+    ephem_maxrand=65535 - ephem_minport; { random count for ephemeral port }
     { other internal constants }
     def_ttl=64;
     rs232_baddr=$08e2;
@@ -119,7 +119,7 @@ var
     baud:char=def_baud;
     _ttl:byte=def_ttl;
     my_ip:ipaddr=(10,99,99,2); { my own ip address }
-    dns_ip:ipaddr=(8,8,8,8);
+    dns_ip:ipaddr=(9,9,9,9); { Quad9 - sod Google }
     addr_any:ipaddr=(0,0,0,0);
     search_domain:string='';
     blsize:byte=def_blsize;
@@ -132,9 +132,9 @@ var
 
 { ======= Utility and config file related routines }
 
-{ strerr(errno) }
+{ strerror(errno) }
 function strerr(e:shortint): string;
-var se:string;
+var se:string[8];
 begin
     case e of
         e_err:      se:='E_ERR';
@@ -161,7 +161,7 @@ function alnum(c: char):boolean;
 begin
     alnum:=false;
     c:=upcase(c);
-    if ((c>'/') and (c<':')) or ((c>'@') and (c<='[')) or (c='-') then alnum:=true;
+    if (c in ['A'..'Z']) or (c in ['0'..'9']) or (c='-') then alnum:=true;
 end;
 
 { trim [^a-Az-Z0-9-] from both ends of a string }
@@ -229,54 +229,61 @@ end;
 
 { process a key,value config entry }
 function parsekv(var k:string;var v:string): boolean;
-var tip:ipaddr;n:byte;
+var tip:ipaddr;n:byte;emsg:string[30];c:char;w:word=0;
 label er;
 begin
   parsekv:=true;
   if k='ip' then begin
-    if parse_ip(v,tip)=0 then my_ip:=tip
-    else begin
-        writeln(cfg_file,': ip=',v,': could not parse');
+    if parse_ip(v,tip)>0 then begin
+         emsg:='could not parse';
          goto er;
     end;
+    my_ip:=tip;
+    exit;
   end;
   if k='dns' then begin
-    if parse_ip(v,tip)=0 then dns_ip:=tip
-    else begin
-        writeln(cfg_file,': dns=',v,': could not parse');
+    if parse_ip(v,tip)>0 then begin
+        emsg:='could not parse';
         goto er;
     end;
+    dns_ip:=tip;
+    exit;
   end;
   if k='blsize' then begin
-    if (parse_byte(v,n)=0) and (n>=min_blsize) and (n<=def_blsize) then blsize:=n
+    if (parse_byte(v,n)=0) and (n>=min_blsize) and (n<=def_blsize) then begin blsize:=n; exit; end
     else begin
-        writeln(cfg_file,': blsize=',v,': outside range (',min_blsize,'..',def_blsize,')');
+        emsg:='outside range (16..224)';
         goto er;
     end;
   end;
   if k='checksums' then begin
-        if upcase(v[1])='T' then checksums:=true;
-        if upcase(v[1])='Y' then checksums:=true;
-        if upcase(v[1])='F' then checksums:=false;
-        if upcase(v[1])='N' then checksums:=false;
+        c:=upcase(v[1]);
+        if (c='T') or (c='Y') then checksums:=true;
+        if (c='F') or (c='N') then checksums:=true;
+        exit;
   end;
   if k='baud' then begin
-        if v='9600' then baud:='7' else
-        if v='4800' then baud:='6' else
-        if v='2400' then baud:='5' else
-        if v='1200' then baud:='4' else
-        if v='600' then baud:='3' else
-        if v='300' then baud:='2' else
-        if v='150' then baud:='1' else
-        if v='75' then baud:='0' else begin
-            writeln(cfg_file,': baud=',v,': unsupported value');
-            goto er;
+        emsg:='unsupported value';
+        val(v,w,n);
+        if n > 0 then goto er;
+        case w of
+            9600:baud:='7';
+            4800:baud:='6';
+            2400:baud:='5';
+            1200:baud:='4';
+             600:baud:='3';
+             300:baud:='2';
+             150:baud:='1';
+              75:baud:='0';
+            else goto er;
         end;
+
+        exit;
   end;
   if k='ttl' then begin
-    if (parse_byte(v,n)=0) and (n>0) then _ttl:=n
+    if (parse_byte(v,n)=0) and (n>0) then begin _ttl:=n; exit; end
     else begin
-        writeln(cfg_file,': ttl=',v,': outside range (1..255)');
+        emsg:='outside range (1..255)';
         goto er;
     end;
   end;
@@ -286,8 +293,9 @@ begin
   exit;
 er:
   parsekv:=false;
+  writeln(cfg_file,': ',k,'=',v,': ',emsg);
 end;
-
+{ suppress I/O errors temporarily, so that the file not existing doesn't halt us }
 {$I-}
 { load config file and parse settings, returns false on failure }
 { note: 'failure' is only a parse failure, the file does not need to exist }
@@ -335,6 +343,7 @@ er:
   readconfig:=false;
   close(f);
 end;
+{ restore halt on I/O errors}
 {$I+}
 
 { ========== other routines follow ======== }
@@ -373,14 +382,15 @@ begin
 end;
 
 { send an IP packet down the pipe }
-procedure pkt_send(var pkt:ippkt);
+function pkt_send(var pkt:ippkt;tout:word):shortint;
 var
 left:word;
 plen:word=0;
 pos:word=0;
 n:byte;i:byte;
+label etmo; label eok;
 begin
-
+    pkt_send:=e_ok;
     { populate length fields and compute checksums }
     with pkt do begin
         plen:=l4_len;
@@ -399,7 +409,10 @@ begin
         end;
 
         left:=plen+ip_hdrlen;
-        if left>pb_mtu then exit; { don't send a packet that's too large }
+        if left>pb_mtu then begin
+            pkt_send:=e_mtu;
+            exit; { don't send a packet that's too large }
+        end;
         ip.len:=swap(left);
         { cheksum is zero while computing the header checksum }
         ip.csum:=0;
@@ -420,6 +433,20 @@ begin
     _wbuf[left]:=pb_sep;inc(left);
     blockwrite(f,_wbuf,left);
     inc(txcnt);
+    { wait for ACK }
+    if tout>0 then timerstart(timer_no,tout);
+    repeat
+        if (rs232_cnt>0) and (rs232_buf[rs232_pos-1]=pb_ack) then goto eok;
+        if (tout>0) and timerout(timer_no) then goto etmo;
+    until kbbuf_cnt<>0;
+    pkt_send:=e_intr;
+    exit;
+eok:
+    blockread(f,_wbuf,1);
+    exit;
+etmo:
+    pkt_send:=e_tmo;
+    exit;
 end;
 { wait for an IP packet until one received or key pressed or timeout, while responding to ICMP echo }
 function pkt_get(var pkt:ippkt;timeout:word):shortint;
@@ -511,7 +538,7 @@ begin
 end;
 
 { respond to ICMP echo }
-procedure echo_respond(var pkt:ippkt);
+function echo_respond(var pkt:ippkt; t:word): shortint;
 var
 tmpaddr:ipaddr;
 begin
@@ -522,13 +549,13 @@ begin
             tmpaddr:=ip.dst;
             ip.dst:=ip.src;
             ip.src:=tmpaddr;
-            pkt_send(pkt);
-        end;
+            echo_respond:=pkt_send(pkt,t);
+        end else echo_respond:=e_unxp;
     end;
 end;
 
 { respond to a packet:send given UDP payload back where it came from (but reverse ports and source/dest) }
-procedure udp_respond(var pkt:ippkt);
+function udp_respond(var pkt:ippkt;t:word):shortint;
 var
 taddr:ipaddr;
 tmpport:word;
@@ -542,7 +569,7 @@ begin
         udp.dport:=udp.sport;
         udp.sport:=tmpport;
     end;
-    pkt_send(pkt);
+    udp_respond:=pkt_send(pkt,t);
 end;
 
 { wait for data on UDP socket }
@@ -559,7 +586,7 @@ begin
     udp_recv:=e_unxp;
     { check if we got what we wanted }
     if pkt.ip.proto<>ipr_udp then begin { not udp }
-        echo_respond(pkt); { maybe it's an echo request }
+        res:=echo_respond(pkt,timeout); { maybe it's an echo request }
         exit;
     end;
     if (longint(sock.remote)>0) and (longint(pkt.ip.src)<>longint(sock.remote)) then exit; { not from the wanted host }
@@ -568,7 +595,7 @@ begin
 end;
 
 { send data (pkt.udp.payload of len pkt.l4_len) to socket }
-procedure udp_send(var pkt:ippkt;var sock:socket);
+function udp_send(var pkt:ippkt;var sock:socket;t:word):shortint;
 begin
     { 'prime' the packet with basic header fields }
     pkt_prime(pkt);
@@ -582,7 +609,7 @@ begin
         sock.lport:=ephem_minport+random(ephem_maxrand);
     end;
     pkt.udp.sport:=swap(sock.lport);
-    pkt_send(pkt);
+    udp_send:=pkt_send(pkt,t);
 end;
 
 { clean up a hostname string and append search domain if no dots }
@@ -600,13 +627,13 @@ begin
 end;
 { resolve shost into ip, using pkt packet }
 { note that we don't map any DNS structures, this all works on raw offsets, to save source code }
-function dns_resolve(shost:string;var rip:ipaddr;var pkt:ippkt;timeout: word; retries: byte):shortint;
+function dns_resolve(shost:string;var rip:ipaddr;var pkt:ippkt;timeout: word; retr: byte):shortint;
 var
 id:word;
 res: shortint;
 anssect: boolean=false;
 off:byte;
-len,ps,ps1:byte;
+len,ps,ps1,retries:byte;
 sock: socket;
 rcount:word=0;
 rdlength:word=0;
@@ -616,6 +643,7 @@ label got_in_a;
 label ezpz;
 label dosect;
 begin
+    retries:=retr;
     { we don't support reverse lookups - if we got an IP, just parse that. Easy peasy. }
     if parse_ip(shost,rip)=0 then goto ezpz;
     { too short or malformed }
@@ -662,19 +690,17 @@ retry:
     end;
     { send the query }
     pkt.l4_len:=off;
-    udp_send(pkt,sock);
+    res:=udp_send(pkt,sock,timeout);
+    if retries>0 then dec(retries);
+    if (retries>0) and (res<e_ok) then goto retry;
+    retries:=retr;
 rxretry:
     if retries>0 then dec(retries);
     pkt_ready; { tell the host that we can receive stuff now }
     { wait for a response packet }
     res:=udp_recv(pkt,sock,timeout);
     { retry on error, unless e_intr }
-    if (res<>e_ok) and (res<>e_intr) and (retries>0) then begin
-        { if it's not a response to what we want, try receiving again }
-        if res = e_unxp then goto rxretry;
-        { otherwise request again, but not if it's a DNS error that's > e_ok }
-        if res < e_ok then goto retry;
-    end;
+    if (retries>0) and (res<>e_ok) and (res<>e_intr) then goto rxretry;
     if res <> e_ok then begin
         dns_resolve := res;
         exit;
@@ -762,28 +788,6 @@ begin
     randomize; { ooh, InfoSec! }
     ip_id:=random($FFFF); { ooh, fancy! }
     pbn_init:=true;
-end;
-
-{ UDP echo test }
-procedure udp_test;
-var
-pkt:ippkt;
-sock:socket;
-res:shortint;
-begin
-    if not pbn_init then exit;
-    sock.rport:=port_any;
-    sock.lport:=7;
-    sock.remote:=addr_any;
-    repeat
-        res:=udp_recv(pkt, sock, 300);
-        if res=e_ok then begin
-            writeln('got udp, ',pkt.l4_len,' bytes');
-            udp_respond(pkt);
-        end;
-        pkt_ready;
-    until res=e_intr;
-    pbn_shutdown;
 end;
 
 procedure dns_test;
