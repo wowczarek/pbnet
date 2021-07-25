@@ -8,7 +8,7 @@
 - Configuration file support on PB-2000: done
 - UDP sockets: done
 - DNS resolver (IN A only): done
-- Compiled binary so far: ~10 kB
+- Compiled binary so far: ~11 kB. Too much.
 
 ## What is PBNET?
 
@@ -58,6 +58,8 @@ To exchange data between the host and the PB, I developed a simple block transfe
 There are numerous other projects for 8-bit computers that include an Ethernet adapter and provide an IP stack, but they often require either modifying the hardware or are based on add-on boards that say go into the ROM card slot. PBNET allows for connecting an unmodified PB-2000, as is, with a suitable serial interface, to the Internet.
 
 ## Project goals and limitations
+
+- **PBNET is a clean slate project**. It is nothing more than one guy's attempt to see what he can remember and put together from a set of classic RFCs. PBNet is not based on, nor is it influenced by, any existing minimal IP stack such as uIP/LwIP, etc. I intentionaly restrained myself from looking at those, but I have worked with the BSD sockets API extensively in the past, so some references are inevitable.
 
 - **PBNET will only support the absolute working minimum.** It does not aim for RFC compliance and working with every guideline that an IP stack should conform to. While I would be glad to implement all this, storage is limited and I have to cheat. On the PB-2000, PBNET will mostly silently drop packets when they are too big, fragmented, or otherwise not expected. This is actually not unusual today with firewalls everywhere, still it could be better.
 
