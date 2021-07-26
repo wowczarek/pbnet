@@ -10,6 +10,8 @@
 - DNS resolver (IN A only): done
 - Compiled binary so far: ~11 kB. Too much.
 
+- Current mode: DNS resolver test
+
 ## What is PBNET?
 
 ### Well, what is it?
@@ -19,6 +21,8 @@ PBNET is an attempt at creating something resembling a semi working IP stack for
 ### For the what?
 
 Casio PB-2000 (PB-2000C / AI-1000) is an 8-bit programmable pocket computer made and sold by Casio in the late 1980s, sporting a QWERTY + numeric keyboard, 192x32 dot matrix LCD and up to 64 kB RAM (32 kB + RP-33 RAM pack). The RAM is shared between system area, heap, stack and file storage, and is battery-backed. The PB-2000 has a calculator mode and a menu-driven file manager. The CPU is a custom Hitachi HD61700, same as used in another pocket Casio computer, the PB-1000. What makes the PB-2000C unique is that it supports a number of programming environments, unlike most similar devices of this era that out of the box only supported BASIC. The PB-2000 has a built-in ROM with a K&R C (yes, C!) interpreter - that's the PB-2000C - or one with LISP (really) - that's the AI-1000 that was only sold in Japan. But that's not where it ends - it also has a ROM card slot, and ROM cards were available with BASIC (OM-53B) and Prolog (OM-52P). C was also available as a ROM card for the AI model. The PB-2000 can interface with the rest of the world via the FA-7 interface (RS-232 serial, parallel port, tape audio in/out) or the MD-100, which is the latter, but replaces the tape interface with a 3.5" floppy disk drive. Unlike other 8-bits you might have heard of like Commodore, Atari , ZX-Spectrum and such like, it does not have a TV output and no fancy scan line juggling circuitry, nor does it have a sound chip - only a simple piezo buzzer out of which you can PWM some chirps. But it's pocketable and runs on batteries. It was meant for engineering and academic use.
+
+In this document I will mostly be referring to the computer as PB-2000 or simply *PB*, which may mean either the PB-2000C or the AI-1000.
 
 ### So it's a programmable calculator?
 
@@ -59,11 +63,11 @@ There are numerous other projects for 8-bit computers that include an Ethernet a
 
 ### State machine on the PB-2000 side
 
-**On the PB-2000 side, there is no state really**, everything happens on demand.
+**On the PB-2000 side, there is no state really**, everything happens on demand:
 
-- When `pkt_get` is called, the loop waiting for packets starts by sending the `RTX` byte, so the host knows it can forward a packet to PB, and while waiting for packets, PB responds to an `ACK` byte with another `ACK` (but this clears the RX buffer on the PB side). This way, the pbnet daemon on the host and any application using PBNET on the PB-2000 can be started in any order.
+- When `pkt_get()` is called, the loop waiting for packets starts by sending the `RTX` byte, so the host knows it can forward a packet to PB, and while waiting for packets, PB responds to an `ACK` byte with another `ACK` (but this clears the RX buffer on the PB side). This way, the pbnet daemon on the host and any application using PBNET on the PB-2000 can be started in any order.
 
-- When `pkt_send` is called, the PB-2000 just encodes and sends the whole packet block by block, ending with a `SEP` byte, and then awaits an `ACK` from the host to confirm that the packet was received.
+- When `pkt_send()` is called, the PB-2000 just encodes and sends the whole packet block by block, ending with a `SEP` byte, and then awaits an `ACK` from the host to confirm that the packet was received.
 
 ### State machine on the host side
 
@@ -78,10 +82,11 @@ There are numerous other projects for 8-bit computers that include an Ethernet a
 |    WACK     | [PB--ACK-->HOST]       | [NO MORE BLOCKS]                      | ->WRTX    |
 |    WRTX     | [PB--RTX-->HOST]       |                                       | ->READY   |
 |    IDLE     | [PB--DATA-->HOST]      |                                       | ->WBLOCK  |
-|    WBLOCK   | [PB--SEP-->HOST]       | [HOST--ACK->PB], Forward packet       | ->IDLE    |
+|    WBLOCK   | [PB--DATA-->HOST]      | Restart WBLOCK timeout timer          | ->WBLOCK  |
+|    WBLOCK   | [PB--SEP-->HOST]       | [HOST--ACK-->PB], Forward packe       | ->IDLE    |
 |    WACK     | TIMEOUT                | ACK timeout                           | ->IDLE    |
-|    WRTX     | TIMEOUT                |                                       | ->IDLE    |
-|    WBLOCK   | TIMEOUT                |                                       | ->IDLE    |
+|    WRTX     | TIMEOUT                | RTX timeout                           | ->IDLE    |
+|    WBLOCK   | TIMEOUT                | Block receipt timeout                 | ->IDLE    |
 
 A `DEAD` state exists for any failures while transmitting and receiving, but its mechanic has not been implemented yet. This is meant to wait and then attempt to reopen the serial port and TUN interface before attempting to go into IDLE again.
 
@@ -107,7 +112,7 @@ A `DEAD` state exists for any failures while transmitting and receiving, but its
 
 ## Throughput
 
-With the core routines (block encoding, decoding and checksums) written in HD61700 assembly, processing is already not the limiting factor and the framing overhead is low (4 bytes per 190 bytes). Piotr Piatek's USB serial module is speed-limited on the RX side and maximum rates PBNET achieves are about 250 Bps RX + ~530 Bps TX. With the FTDI chip buffering, we don't have to worry about the speed with which we write to PB's port, but for use with Casio serial interfaces, PBNET uses staggered transmit and a fixed delay is added per byte (`-l` option, microseconds, default is 1000 = 1 ms). This does not affect the preformance via the  USB interface, but allows uninterrupted transmission with the FA-7 or MD-100. This was tested by Piotr Piatek with an MD-100 and rates were 400+ Bps RX, 700+ Bps TX. With Piotr's USB module, we achieve ~250 Bps RX (limited by the module), and ~530 Bps TX.
+With the core routines (block encoding, decoding and checksums) written in HD61700 assembly, processing is already not the limiting factor and the framing overhead is low (4 bytesper 240 bytes + SEP). Piotr Piatek's USB serial module is speed-limited on the RX side and maximum rates PBNET achieves are about 250 Bps RX + ~530 Bps TX. With the FTDI chip buffering, we don't have to worry about the speed with which we write to PB's port, but for use with Casio serial interfaces, PBNET uses staggered transmit and a fixed delay is added per byte (`-l` option, microseconds, default is 1000 = 1 ms). This does not affect the preformance via the  USB interface, but allows uninterrupted transmission with the FA-7 or MD-100. This was tested by Piotr Piatek with an MD-100 and rates were 400+ Bps RX, 700+ Bps TX. With Piotr's USB module, we achieve ~250 Bps RX (limited by the module), and ~530 Bps TX.
 
 ## Protocol support
 
@@ -162,6 +167,8 @@ The supported settings are:
 **NOTE 1:** *If you are happy with the defaults, there is no need for `pbnet.cfg` to exist.*
 
 **NOTE 2:** *The config file is parsed every time `pbn_init` is called, typically once in an application using PBNET.*
+
+**NOTE 3:** *The config file parser takes up precious code space - it may need to be simplified to be less user-friendly, but more compact*
 
 #### Host side
 
