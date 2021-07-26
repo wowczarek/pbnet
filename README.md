@@ -114,9 +114,9 @@ A `DEAD` state exists for any failures while transmitting and receiving, but its
 
 With the core routines (block encoding, decoding and checksums) written in HD61700 assembly, processing is already not the limiting factor and the framing overhead is low (4 bytesper 240 bytes + SEP). Piotr Piatek's USB serial module is speed-limited on the RX side and maximum rates PBNET achieves are about 250 Bps RX + ~530 Bps TX. With the FTDI chip buffering, we don't have to worry about the speed with which we write to PB's port, but for use with Casio serial interfaces, PBNET uses staggered transmit and a fixed delay is added per byte (`-l` option, microseconds, default is 1000 = 1 ms). This does not affect the preformance via the  USB interface, but allows uninterrupted transmission with the FA-7 or MD-100. This was tested by Piotr Piatek with an MD-100 and rates were 400+ Bps RX, 700+ Bps TX. With Piotr's USB module, we achieve ~250 Bps RX (limited by the module), and ~530 Bps TX.
 
-## Protocol support
+## Protocol support and features.
 
-PBNET supports (will support) ICMP, UDP and TCP, and has a very basic DNS resolver, which only handles IN A records.
+PBNET supports (will support) ICMP, UDP and TCP, and has a very basic (non-recursive!) DNS resolver, which only handles IN A records. A simple TFTP server and a `net` tool (resolver, ping, show config) will probably be developed before TCP.
 
 ## Future plans / items under consideration
 
@@ -149,6 +149,8 @@ Download the source on a Linux host, type "make". This will build the host daemo
 **A proper installation procedure to follow once this is made into a unit, etc.**
 
 ### Configuring PBNET
+
+In general, the default settings are enough for stable operation and best performance, but can be adjusted if needed - especially IP addressing and the DNS server, say if you have a local one.
 
 #### PB-2000C / AI-1000 side
 
