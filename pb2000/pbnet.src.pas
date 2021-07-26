@@ -688,19 +688,28 @@ retry:
         inc(off,2); payload[off]:=1; { QCLASS=0x0001=IN }
         inc(off);
     end;
-    { send the query }
+    { send the query, retry if need be }
     pkt.l4_len:=off;
     res:=udp_send(pkt,sock,timeout);
-    if retries>0 then dec(retries);
-    if (retries>0) and (res<e_ok) then goto retry;
+    if res<>e_ok then begin
+        if retries > 0 then begin
+            dec(retries);
+            goto retry;
+        end;
+        dns_resolve:=res;
+        exit;
+    end;
+    { reset the retries counter }
     retries:=retr;
 rxretry:
-    if retries>0 then dec(retries);
     pkt_ready; { tell the host that we can receive stuff now }
     { wait for a response packet }
     res:=udp_recv(pkt,sock,timeout);
-    { retry on error, unless e_intr }
-    if (retries>0) and (res<>e_ok) and (res<>e_intr) then goto rxretry;
+    { retry on error, unless e_intr, that always exits }
+    if (retries>1) and (res<>e_ok) and (res<>e_intr) then begin
+        dec(retries);
+        goto rxretry;
+    end;
     if res <> e_ok then begin
         dns_resolve := res;
         exit;
