@@ -75,12 +75,12 @@ There are numerous other projects for 8-bit computers that include an Ethernet a
 |-------------|------------------------|---------------------------------------|-----------|
 | != READY    | [HOST-->PACKET-->PB]   | Queue packet or send ICMP unreachable | NO CHANGE |
 |  ->IDLE     | Initial state          | [HOST--ACK-->PB] once                 | NO CHANGE |
-|    IDLE     | [PB--[ACK|RTX]-->HOST] |                                       | ->READY   |
+|    IDLE     | [PB--[ACK,RTX]-->HOST] | PB ready to receive                   | ->READY   |
 |    READY    | [PB--STX-->HOST]       | Stop accepting packets from host      | ->WRTX    |
 |    READY    | [HOST--PACKET-->PB]    | [TX BLOCK #1]                         | ->WACK    |
 |    WACK     | [PB--ACK-->HOST]       | [TX NEXT BLOCK...SEP]                 | ->WACK    |
 |    WACK     | [PB--ACK-->HOST]       | [NO MORE BLOCKS]                      | ->WRTX    |
-|    WRTX     | [PB--RTX-->HOST]       |                                       | ->READY   |
+|    WRTX     | [PB--RTX-->HOST]       | PB ready to receive                   | ->READY   |
 |    IDLE     | [PB--DATA-->HOST]      |                                       | ->WBLOCK  |
 |    WBLOCK   | [PB--DATA-->HOST]      | Restart WBLOCK timeout timer          | ->WBLOCK  |
 |    WBLOCK   | [PB--SEP-->HOST]       | [HOST--ACK-->PB], Forward packe       | ->IDLE    |
