@@ -53,13 +53,41 @@ PBNET connects a Linux host (gateway, router, whatever) to the PB-2000 using its
 
 The natural choice for a project like this was to use SLIP (https://en.wikipedia.org/wiki/Serial_Line_Internet_Protocol), which is a well-established standard, and that is what I tested initially. SLIP is trivial to implement, but it quickly turned out it wasn't going to work. SLIP requires hardware flow control in both directions, because it does not escape XON/XOFF. Unfortunately PB-2000C does not support hardware flow control in the RX direction, so a dedicated protocol was required that either worked with XON/XOFF and escaped those bytes, or did its own flow control. Because the PB-2000 is quite fragile when it comes to its serial buffer overflowing, flow control had to be explicitly controlled, and XON/XOFF is typically transparent, so I had to do my own.
 
-To exchange data between the host and the PB, I developed a simple block transfer protocol with explicit flow control, that I could call IPBSP: IP over Broken Serial Ports. Data is transfered in up to n-byte blocks (generally as large as the PB's 256-byte buffer can fit without barfing a Read Fault error, but I settled for 190), and receipt of every block is confirmed with an `ACK` byte. The last block in a packet (which can be less than n bytes), ends with a `SEP` byte. Flow control is performed using two more bytes: `STX` (stop transmission) and `RTX` (resume transmission). So we have four control bytes. Because the block size necessarily has to be controlled, we cannot afford an escape type encoding like the one used by SLIP, where a reserved byte XXX is transmitted as a pair: ESC + ESC_XXX - so we could have a portion encoded in anywhere between n and n ** 2 bytes. Instead, I opted for a variant of the escapeless encoding scheme (http://chilliant.blogspot.com/2020/01/escapeless-restartable-binary-encoding.html), where with x reserved bytes, we inspect a block for x non-occurring bytes and replace the reserved bytes with those, and send those x replacements as a header before the block of data. This ensures a fixed maximum block size, at the cost of 4 bytes per block, and extra processing. See "goals and limitations". Note that no acknowledgments are performed in the PB->host direction. With data volumes being so low, there is near-zero chance that the host will not be able to read all data coming from the PB in time.
+To exchange data between the host and the PB, I developed a simple block transfer protocol with explicit flow control, that I could call IPBSP: IP over Broken Serial Ports. Data is transfered in up to n-byte blocks - as large as the PB's 256-byte buffer can fit without barfing a Read Fault error, but I settled for 224, (256-32), which is the condition where PB normally sends XOFF. The receipt of every block is confirmed with an `ACK` byte and the last block in a packet (which can be less than n bytes), ends with a `SEP` byte. Flow control is performed using two more bytes: `STX` (stop transmission) and `RTX` (resume transmission). So we have four control bytes. Because the block size necessarily has to be controlled, we cannot afford an escape type encoding like the one used by SLIP, where a reserved byte XXX is transmitted as a pair: ESC + ESC_XXX - so we could have a portion encoded in anywhere between n and n ** 2 bytes. Instead, I opted for a variant of the escapeless encoding scheme (http://chilliant.blogspot.com/2020/01/escapeless-restartable-binary-encoding.html), where with x reserved bytes, we inspect a block for x non-occurring bytes and replace the reserved bytes with those, and send those x replacements as a header before the block of data. This ensures a fixed maximum block size, at the cost of 4 bytes per block, and extra processing. See "goals and limitations". Note that no acknowledgments are performed in the PB->host direction. With data volumes being so low, there is near-zero chance that the host will not be able to read all data coming from the PB in time.
 
 There are numerous other projects for 8-bit computers that include an Ethernet adapter and provide an IP stack, but they often require either modifying the hardware or are based on add-on boards that say go into the ROM card slot. PBNET allows for connecting an unmodified PB-2000, as is, with a suitable serial interface, to the Internet.
 
+### State machine on the PB-2000 side
+
+**On the PB-2000 side, there is no state really**, everything happens on demand.
+
+- When `pkt_get` is called, the loop waiting for packets starts by sending the `RTX` byte, so the host knows it can forward a packet to PB, and while waiting for packets, PB responds to an `ACK` byte with another `ACK` (but this clears the RX buffer on the PB side). This way, the pbnet daemon on the host and any application using PBNET on the PB-2000 can be started in any order.
+
+- When `pkt_send` is called, the PB-2000 just encodes and sends the whole packet block by block, ending with a `SEP` byte, and then awaits an `ACK` from the host to confirm that the packet was received.
+
+### State machine on the host side
+
+| Start state | Trigger / Event        | Action / conditions / comments        | End state |
+--------------------------------------------------------------------------------------------
+| != READY    | [HOST-->PACKET-->PB]   | Queue packet or send ICMP unreachable | NO CHANGE |
+|  ->IDLE     | Initial state          | [HOST--ACK-->PB] once                 | NO CHANGE |
+|    IDLE     | [PB--[ACK|RTX]-->HOST] |                                       | ->READY   |
+|    READY    | [PB--STX-->HOST]       | Stop accepting packets from host      | ->WRTX    |
+|    READY    | [HOST--PACKET-->PB]    | [TX BLOCK #1]                         | ->WACK    |
+|    WACK     | [PB--ACK-->HOST]       | [TX NEXT BLOCK...SEP]                 | ->WACK    |
+|    WACK     | [PB--ACK-->HOST]       | [NO MORE BLOCKS]                      | ->WRTX    |
+|    WRTX     | [PB--RTX-->HOST]       |                                       | ->READY   |
+|    IDLE     | [PB--DATA-->HOST]      |                                       | ->WBLOCK  |
+|    WBLOCK   | [PB--SEP-->HOST]       | [HOST--ACK->PB], Forward packet       | ->IDLE    |
+|    WACK     | TIMEOUT                | ACK timeout                           | ->IDLE    |
+|    WRTX     | TIMEOUT                |                                       | ->IDLE    |
+|    WBLOCK   | TIMEOUT                |                                       | ->IDLE    |
+
+A `DEAD` state exists for any failures while transmitting and receiving, but its mechanic has not been implemented yet. This is meant to wait and then attempt to reopen the serial port and TUN interface before attempting to go into IDLE again.
+
 ## Project goals and limitations
 
-- **PBNET is a clean slate project**. It is nothing more than one guy's attempt to see what he can remember and put together from a set of classic RFCs. PBNet is not based on, nor is it influenced by, any existing minimal IP stack such as uIP/LwIP, etc. I intentionaly restrained myself from looking at those, but I have worked with the BSD sockets API extensively in the past, so some references are inevitable.
+- **PBNET is a clean slate project**. It is nothing more than one guy's attempt to see what he can remember and put together from a set of classic RFCs. PBNET is not based on, nor is it influenced by, any existing minimal IP stack such as uIP/LwIP, etc. I intentionaly restrained myself from looking at those, but I have worked with the BSD sockets API extensively in the past, so some references are inevitable.
 
 - **PBNET will only support the absolute working minimum.** It does not aim for RFC compliance and working with every guideline that an IP stack should conform to. While I would be glad to implement all this, storage is limited and I have to cheat. On the PB-2000, PBNET will mostly silently drop packets when they are too big, fragmented, or otherwise not expected. This is actually not unusual today with firewalls everywhere, still it could be better.
 
@@ -81,21 +109,72 @@ There are numerous other projects for 8-bit computers that include an Ethernet a
 
 With the core routines (block encoding, decoding and checksums) written in HD61700 assembly, processing is already not the limiting factor and the framing overhead is low (4 bytes per 190 bytes). Piotr Piatek's USB serial module is speed-limited on the RX side and maximum rates PBNET achieves are about 250 Bps RX + ~530 Bps TX. With the FTDI chip buffering, we don't have to worry about the speed with which we write to PB's port, but for use with Casio serial interfaces, PBNET uses staggered transmit and a fixed delay is added per byte (`-l` option, microseconds, default is 1000 = 1 ms). This does not affect the preformance via the  USB interface, but allows uninterrupted transmission with the FA-7 or MD-100. This was tested by Piotr Piatek with an MD-100 and rates were 400+ Bps RX, 700+ Bps TX. With Piotr's USB module, we achieve ~250 Bps RX (limited by the module), and ~530 Bps TX.
 
-## API and protocol support
+## Protocol support
 
 PBNET supports (will support) ICMP, UDP and TCP, and has a very basic DNS resolver, which only handles IN A records.
 
-## Future plans
+## Future plans / items under consideration
 
+- Initially PBNET will operate on single connections, one at a time, but the intention is to implement an event loop where multiple sockets can be handled using callbacks
 - PBNET could eventually support IPv6 - it's only a matter of parsing more types of packets
+- PBNET could be ported to other ROMs than DL-Pascal, but this would mostly lead to single-purpose applications - only DL-Pascal supports reusable, loadable libraries
 
-## Building and installing PBNET
+## Using PBNET
+
+### Requirements
+
+#### Host
+
+- A serial port and a null-modem cable, or Piotr Piatek's USB adapter (http://www.pisi.com.pl/piotr433/usb100_e.htm)
+- Linux or WSL, anything with a serial port connected to your PB-2000C, a C compiler
+- The host daemon uses POSIX calls and Linux' TUN API, but it should be easily portable to BSD and other POSIX compatible OSes
+- There is nothing wrong with Windows anymore really and a native Windows port is of course possible, but it is not the author's priority
+
+#### PB-2000C / AI-1000
+
+- VIP ticket: The DL-Pascal ROM card
+- Storage is very limited, so it is recommended to have the RP-33 expansion installed to have a total of 64 kB of RAM
+- PBNet uses very little stack space and uses less than the default 2 kB of heap/var space *TODO: exact figures*
+- Either an MD-100 or FA-7 interface with a null-modem cable (DB25 on the PB side, likely DB9 on the host side), or the USB adapter
+
+### Building and installing PBNET
 
 Download the source on a Linux host, type "make". This will build the host daemon, host/pbnet, compile the assembly files and include into pb2000/pbnet.src.pas to make pb2000/pbnet.pas.
 
-** A proper installation procedure to follow once this is made into a unit, etc. **
+**A proper installation procedure to follow once this is made into a unit, etc.**
+
+### Configuring PBNET
+
+#### PB-2000C / AI-1000 side
+
+The defaults are: baud rate 9600, block size 224, IP address `10.99.99.2` and DNS server `9.9.9.9` (https://quad9.net/). There is no gateway setting - this is a point to point link and the PB only has one possible route.
+
+To configure PBNET / change any defaults, create a new text file `pbnet.cfg`, which holds `key=value` settings, one per line, with optional comments starting with `;`.
+
+The supported settings are:
+- `ip=<a.b.c.d>`: PB's IP address
+- `baud=<9600..75>`: baud rate, 9600 is the default
+- `dns=<e.f.g.h>`: IP address of the DNS resolver - only one
+- `blocksize=<16..224>`: best to leave at default value (224), also must match on the host side!
+- `ttl=<1..255>`: IP Time To Live (hop limit) set in packets generated by the PB. Default is 64.
+- `checksums=<tTyYfFnN>`: enable or disable checksum calculation and validation on the PB, default is true.
+
+**NOTE 1:** *If you are happy with the defaults, there is no need for `pbnet.cfg` to exist.*
+**NOTE 2:** *The config file is parsed every time `pbn_init` is called, typically once in an application using PBNET.*
+
+#### Host side
+
+Just run `pbnet -h` to see the available options and defaults. Using command line parameters you can configure the serial device, baud rate, block size, delay, IP address and netmask of the host side, etc. The default netmask is /24 rather than say /30 which makes more sense for a point to point interface, but this is mostly to test and demonstrate the PB discarding packets meant for other addresses on the same subnet. The default IP address on the host side is `10.99.99.1`.
+
+### Working with PBNET
+
+*API description to follow*
+
+## FAQ
+
+- **Q:** *I have everything connected and running, the host is receiving packets from the PB, but I am getting no response from the DNS server or any other Internet or LAN host other than the host connected to the PB - why?*
+- **A:** *PBNET forwards packets from your PB towards your host, but that is where it ends. The host needs to have IP forwarding enabled, your router must have a route to your PB via your host and if required, needs to allow NAT from your PB's IP address, or otherwise your host needs to NAT PB's address to its own. Configuring these things is up to you, the user.*
 
 ### Acknowledgments
 
 Like pretty much every project relating to PB-1000 and PB-2000, I would like to thank Piotr Piatek (http://www.pisi.com.pl/piotr433/index.htm) for his insights into the hardware and help with testing. This man has created an amazing body of work around these platforms and he also developed FPGA/CPLD based hardware modules for serial communication and mass storage, replacing the bulky FA-7 or MD-100 - he also developed an emulator for the PB-2000 that I use for compiling PBNET without having to transfer the source back and forth. I would also like to thank Pascal a.k.a. Xerxes for pushing his pre-production DL-Pascal card to eBay one day, Juergen Keller for his help with accessing DL-Pascal 1.2 and Blue for the HD61700 cross-assembler (http://hd61700.yukimizake.net/)
-
