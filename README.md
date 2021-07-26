@@ -68,7 +68,7 @@ There are numerous other projects for 8-bit computers that include an Ethernet a
 ### State machine on the host side
 
 | Start state | Trigger / Event        | Action / conditions / comments        | End state |
---------------------------------------------------------------------------------------------
+|-------------|------------------------|---------------------------------------|-----------|
 | != READY    | [HOST-->PACKET-->PB]   | Queue packet or send ICMP unreachable | NO CHANGE |
 |  ->IDLE     | Initial state          | [HOST--ACK-->PB] once                 | NO CHANGE |
 |    IDLE     | [PB--[ACK|RTX]-->HOST] |                                       | ->READY   |
@@ -160,6 +160,7 @@ The supported settings are:
 - `checksums=<tTyYfFnN>`: enable or disable checksum calculation and validation on the PB, default is true.
 
 **NOTE 1:** *If you are happy with the defaults, there is no need for `pbnet.cfg` to exist.*
+
 **NOTE 2:** *The config file is parsed every time `pbn_init` is called, typically once in an application using PBNET.*
 
 #### Host side
