@@ -39,7 +39,7 @@ clloop:
 
     pre IX, $2 ; reset IX, IX = cmap
     ldw $10,$8 ; copy len into $10
-    ld $15,0 ; mac = 0
+    byu $15; mac = 0
     ld $16,&hff ; mic = 255
 
 ; check and mark bytes present in block

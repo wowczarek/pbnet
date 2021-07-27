@@ -31,29 +31,35 @@ const
     { location of the protocol field in IPv4 header }
     ipr_off=9;
     { header lengths }
-    ip_hdrlen=20;
-    icmp_hdrlen=8;
-    udp_hdrlen=8;
+    ip_hlen=20;
+    icmp_hlen=8;
+    udp_hlen=8;
+    tcp_hlen=20;
     { ICMP types }
-    icmp_mtype_echo=8;
-    icmp_mtype_echoreply=0;
+    icmp_mecho=8;
+    icmp_mechoreply=0;
     { DNS return codes (RCODE) }
     de_formerr=1;de_servfail=2;de_nxdomain=3;de_notimp=4;de_refused=5;de_notzone=9;
+    { TCP flags }
+    tc_fin=1;tc_syn=2;tc_rst=4;tc_psh=8;tc_ack=16;
     { other socket constants }
     port_any=0;
-    ephem_minport=49152; { lowest ephemeral port, IANA }
-    ephem_maxrand=65535 - ephem_minport; { random count for ephemeral port }
+    eph_min=49152; { lowest ephemeral port, IANA }
+    eph_maxr=65535 - eph_min; { random count for ephemeral port }
     { other internal constants }
     def_ttl=64;
     rs232_baddr=$08e2;
     timer_no=2;
     kv_maxlen=127; { max key/value string length }
 type
+    quad=array [0..3] of byte;
     { an IP address - better this than a longint, really }
-    ipaddr=array [0..3] of byte;
+    ipaddr=quad;
+    {tcp state}
+    tcp_state=(listen,synsent,synrecv,estab,finwait1,finwait2,closewait,closing,lastack,timewait,closed);
     { a socket descriptor }
     socket=record
-        state:byte; { state (for TCP) }
+        state:tcp_state; { state (for TCP) }
         lport:word; { local port:source port for PB->world, destination port for world->PB }
         rport:word; { remore port}
         remote:ipaddr; { remote address }
@@ -88,6 +94,19 @@ type
         csum:word;
         payload:array [0..1471] of byte;
     end;
+    { TCP header + payload }
+    tcp_hdr=record
+        sport:word;
+        dport:word;
+        seqno: quad;
+        ackno: quad;
+        doff:byte; { 5 without options, 6 with MSS }
+        flags:byte;
+        wsize:word;
+        csum:word;
+        uptr:word;
+        payload:array[0..1459] of byte;
+    end;
     { all-in-one packet format using record variants - Pascal's riot police }
     { what riot police you say? response to unions! }
     ippkt=record
@@ -100,18 +119,16 @@ type
                 case :byte of
                     0:{ variant 1:Raw IPv4 payload } (payload:array [0..1479] of byte);
                     1:{ variant 2:ICMP + payload   } (icmp:   icmp_hdr);
-                    2:{ variant 3:UDP + payload    } (udp:    udp_hdr)
+                    2:{ variant 3:UDP + payload    } (udp:    udp_hdr);
+                    3:{ variant 4:TCP + payload    } (tcp:    tcp_hdr)
             )
     end;
 var 
     f:file; { serial port file descriptor }
-    _cmap:array [0..255] of byte; { symbol check map }
+    _cmap:array [0..255] of byte; { symbol check map. could be a bit map (32 bytes), but it's not worth it, there's only a single bit shift instruction, it would be too slow }
     _wbuf:array [0..256] of byte; { rs232 block work buffer for rx/tx + sep }
     { control characters as variables, so they can be sent as is}
-    pbc_sep:byte=pb_sep;
-    pbc_ack:byte=pb_ack;
-    pbc_stx:byte=pb_stx;
-    pbc_rtx:byte=pb_rtx;
+    pbc_sep:byte=pb_sep;pbc_ack:byte=pb_ack;pbc_stx:byte=pb_stx;pbc_rtx:byte=pb_rtx;
     rs232_cnt:byte absolute $08e0; { # bytes in rs232 buffer }
     rs232_pos:byte absolute $08e1; { buffer write position }
     rs232_buf:array [0..255] of byte absolute $08e2;
@@ -120,7 +137,7 @@ var
     _ttl:byte=def_ttl;
     my_ip:ipaddr=(10,99,99,2); { my own ip address }
     dns_ip:ipaddr=(9,9,9,9); { Quad9 - sod Google }
-    addr_any:ipaddr=(0,0,0,0);
+    addr_any:ipaddr=(0,0,0,0); { INADDR_ANY }
     search_domain:string='';
     blsize:byte=def_blsize;
     checksums:boolean=true;
@@ -195,19 +212,10 @@ begin
   tl:=epos-spos+1;byte(r[0]):=tl;move(astr[spos],r[1],tl);trim:=r;
 end;
 
-{ parse a byte from string, return 0 when all parsed }
-function parse_byte(var sb:string;var b:byte):byte;
-var p:byte;
-begin
-    val(sb,b,p);
-    parse_byte:=p;
-end;
-
 { parse an IP address from string into ipaddr - no range checks! returns 0 if all 4 octets parsed }
 function parse_ip(var v:string;var tgt:ipaddr):byte;
-var p,p1:byte;
+var n,p,p1:byte;
     os:string;
-    n,np:byte;
     i,j:byte;
 begin
     parse_ip:=1;
@@ -222,14 +230,14 @@ begin
         os:=copy(v,p1,p-p1);p1:=p+1;
       end;
         inc(i);
-        if parse_byte(os,tgt[j])=0 then inc(j);
+        val(os,tgt[j],n); if n=0 then inc(j);
     end;
     if j=4 then parse_ip:=0;
 end;
 
 { process a key,value config entry }
 function parsekv(var k:string;var v:string): boolean;
-var tip:ipaddr;n:byte;emsg:string[30];c:char;w:word=0;
+var tip:ipaddr;n,m:byte;emsg:string[30];c:char;w:word=0;
 label er;
 begin
   parsekv:=true;
@@ -250,7 +258,8 @@ begin
     exit;
   end;
   if k='blsize' then begin
-    if (parse_byte(v,n)=0) and (n>=min_blsize) and (n<=def_blsize) then begin blsize:=n; exit; end
+    val(v,n,m);
+    if (m=0) and (n>=min_blsize) and (n<=def_blsize) then begin blsize:=n; exit; end
     else begin
         emsg:='outside range (16..224)';
         goto er;
@@ -281,7 +290,8 @@ begin
         exit;
   end;
   if k='ttl' then begin
-    if (parse_byte(v,n)=0) and (n>0) then begin _ttl:=n; exit; end
+    val(v,n,m);
+    if (m=0) and (n>0) then begin _ttl:=n; exit; end
     else begin
         emsg:='outside range (1..255)';
         goto er;
@@ -301,7 +311,6 @@ end;
 { note: 'failure' is only a parse failure, the file does not need to exist }
 function readconfig:boolean;
 var
-hvan: boolean=false;
  i:byte=1;
  p:byte;
  lc:byte=1;
@@ -368,6 +377,11 @@ procedure dec_block(var pkt:array of byte;var wbuf:array of byte;pos:word;len:by
 begin
 {$I dec_bl.pas}
 end;
+{ compare two quads of bytes }
+function quad_eq(var ada:array of byte;var adb:array of byte): boolean;
+begin
+{$I quad_eq.pas}
+end;
 
 { don't send us anything for now }
 procedure pkt_hold;
@@ -380,6 +394,7 @@ procedure pkt_ready;
 begin
     blockwrite(f, pbc_rtx, 1); { resume transmission }
 end;
+
 
 { send an IP packet down the pipe }
 function pkt_send(var pkt:ippkt;tout:word):shortint;
@@ -396,19 +411,19 @@ begin
         plen:=l4_len;
         case ip.proto of
             ipr_icmp:begin
-                inc(plen, icmp_hdrlen);
+                inc(plen, icmp_hlen);
                 { compute ICMP checksum }
                 icmp.csum:=0;
                 icmp.csum:=pkt_checksum(payload, 0, plen);
             end;
             ipr_udp:begin
-                inc(plen,udp_hdrlen);
+                inc(plen,udp_hlen);
                 udp.csum:=0;
                 udp.len:=swap(plen);
             end;
         end;
 
-        left:=plen+ip_hdrlen;
+        left:=plen+ip_hlen;
         if left>pb_mtu then begin
             pkt_send:=e_mtu;
             exit; { don't send a packet that's too large }
@@ -416,7 +431,7 @@ begin
         ip.len:=swap(left);
         { cheksum is zero while computing the header checksum }
         ip.csum:=0;
-        ip.csum:=pkt_checksum(pkt.data, 0, ip_hdrlen);
+        ip.csum:=pkt_checksum(pkt.data, 0, ip_hlen);
     end;
 
     { encode and send block by block }
@@ -448,7 +463,7 @@ etmo:
     pkt_send:=e_tmo;
     exit;
 end;
-{ wait for an IP packet until one received or key pressed or timeout, while responding to ICMP echo }
+{ wait for an IP packet until one received or key pressed or timeout }
 function pkt_get(var pkt:ippkt;timeout:word):shortint;
 var
 c:byte;
@@ -464,54 +479,55 @@ begin
     repeat
         br:=rs232_cnt;
         if br>0 then begin
+            { last byte in the buffer. this can be fragile while still receiving, but we only use this to check for SEP where no more data is received }
             c:=rs232_buf[rs232_pos-1];
-                if c=pb_ack then begin
-                    blockread(f, _wbuf,br);
+            blockread(f, _wbuf[bpos],br);
+            if c=pb_sep then dec(br);
+            inc(bpos,br);
+            { assembled a full block }
+            if bpos=blsize then begin
+                { restart the timer for next block }
+                if timeout>0 then timerstart(timer_no,timeout);
+                if (plen+bsize)>pb_mtu then begin
+                    pkt_get:=e_mtu;
+                    exit;
+                end;
+                { decode the block and acknowledge }
+                dec_block(pkt.data,_wbuf,plen,bpos);
+                blockwrite(f,pbc_ack,1);
+                inc(plen, bsize);
+                bpos:=0;
+            end;
+            { got SEP, end of packet }
+            if c=pb_sep then begin
+                { there is data to decode = block shorter than block size = last block }
+                if bpos>0 then begin
+                    if bpos<pb_mcn then goto trunc;
+                    if (plen+bpos-pb_mcn)>pb_mtu then begin
+                        pkt_get:=e_mtu;
+                        exit;
+                    end;
+                    { decode the remaining data and acknowledge }
+                    dec_block(pkt.data, _wbuf, plen, bpos);
                     blockwrite(f,pbc_ack,1);
-                    bpos:=0;
-                    plen:=0;
-                end else begin
-                    blockread(f, _wbuf[bpos],br);
-                    if c=pb_sep then dec(br);
-                    inc(bpos,br);
-                    if bpos=blsize then begin
-                        if timeout>0 then timerstart(timer_no,timeout);
-                        if (plen+bsize)>pb_mtu then begin
-                            pkt_get:=e_mtu;
-                            exit;
-                        end;
-                        dec_block(pkt.data,_wbuf,plen,bpos);
-                        blockwrite(f,pbc_ack,1);
-                        inc(plen, bsize);
-                        bpos:=0;
-                    end;
-                    if c=pb_sep then begin
-                        if bpos>0 then begin
-                            if bpos<pb_mcn then goto trunc;
-                            if (plen+bpos-pb_mcn)>pb_mtu then begin
-                                pkt_get:=e_mtu;
-                                exit;
-                            end;
-                            dec_block(pkt.data, _wbuf, plen, bpos);
-                            blockwrite(f,pbc_ack,1);
-                            if timeout>0 then timerstart(timer_no,timeout);
-                        end;
-                        pkt_hold; { tell the other end to stop transmitting while we process }
-                        pkt.len:=plen+bpos-pb_mcn;bpos:=0;plen:=0;
-                        goto have_pkt;
-                    end;
-                 end;
+                end;
+                pkt_hold; { tell the other end to stop transmitting while we process }
+                pkt.len:=plen+bpos-pb_mcn;bpos:=0;plen:=0;
+                goto have_pkt;
+            end;
         end;
         if (timeout>0) and timerout(timer_no) then goto tmout;
         if (kbbuf_cnt<>0) then goto intr;
     until false;
 have_pkt:
     pkt_get:=e_unxp;
-    if longint(pkt.ip.dst)<>longint(my_ip) then exit; { not for me }
+    if not quad_eq(pkt.ip.dst, my_ip) then exit; { not for me }
     pkt_get:=e_ok;
+    { update l4_len based on protocol }
     case pkt.ip.proto of
-        ipr_icmp:pkt.l4_len:=swap(pkt.ip.len)-icmp_hdrlen-ip_hdrlen; { come on ICMP, get a length field! }
-        ipr_udp :pkt.l4_len:=swap(pkt.udp.len)-udp_hdrlen;
+        ipr_icmp:pkt.l4_len:=swap(pkt.ip.len)-icmp_hlen-ip_hlen; { come on ICMP, get a length field! }
+        ipr_udp :pkt.l4_len:=swap(pkt.udp.len)-udp_hlen;
+        ipr_tcp :pkt.l4_len:=swap(pkt.ip.len)-(swap(pkt.tcp.doff) shl 2);
     end;
     if swap(pkt.ip.len)=pkt.len then exit;
 trunc:
@@ -543,8 +559,8 @@ var
 tmpaddr:ipaddr;
 begin
     with pkt do begin
-        if (ip.proto=ipr_icmp) and (icmp.mtype=icmp_mtype_echo) then begin
-            icmp.mtype:=icmp_mtype_echoreply;
+        if (ip.proto=ipr_icmp) and (icmp.mtype=icmp_mecho) then begin
+            icmp.mtype:=icmp_mechoreply;
             { swap src and dst address }
             tmpaddr:=ip.dst;
             ip.dst:=ip.src;
@@ -554,7 +570,7 @@ begin
     end;
 end;
 
-{ respond to a packet:send given UDP payload back where it came from (but reverse ports and source/dest) }
+{ respond to a packet:send given UDP payload back to where it came from (but reverse ports and source/dest) }
 function udp_respond(var pkt:ippkt;t:word):shortint;
 var
 taddr:ipaddr;
@@ -589,7 +605,7 @@ begin
         res:=echo_respond(pkt,timeout); { maybe it's an echo request }
         exit;
     end;
-    if (longint(sock.remote)>0) and (longint(pkt.ip.src)<>longint(sock.remote)) then exit; { not from the wanted host }
+    if (not quad_eq(sock.remote,addr_any)) and (not quad_eq(pkt.ip.src,sock.remote)) then exit; { not from the wanted host }
     if (sock.lport>port_any) and (sock.lport<>swap(pkt.udp.dport)) then exit; { not for the wanted port }
     udp_recv:=e_ok;
 end;
@@ -606,7 +622,7 @@ begin
     pkt.udp.dport:=swap(sock.rport);
     { if we don't have a source port, randomise it and assign it }
     if sock.lport=0 then begin
-        sock.lport:=ephem_minport+random(ephem_maxrand);
+        sock.lport:=eph_min+random(eph_maxr);
     end;
     pkt.udp.sport:=swap(sock.lport);
     udp_send:=pkt_send(pkt,t);
@@ -626,7 +642,7 @@ begin
     hname_cleanup:=true;
 end;
 { resolve shost into ip, using pkt packet }
-{ note that we don't map any DNS structures, this all works on raw offsets, to save source code }
+{ note that we don't map any DNS structures, this all works on raw offsets, to save code }
 function dns_resolve(shost:string;var rip:ipaddr;var pkt:ippkt;timeout: word; retr: byte):shortint;
 var
 id:word;
@@ -637,6 +653,7 @@ len,ps,ps1,retries:byte;
 sock: socket;
 rcount:word=0;
 rdlength:word=0;
+in_a:quad=(0,1,0,1); { IN A: class+type=0x01 }
 label retry;
 label rxretry;
 label got_in_a;
@@ -746,7 +763,7 @@ dosect:
                 { AN section }
                 if anssect then begin
                     { do we have an IN A ? }
-                    if (payload[off]=0) and (payload[off+1]=1) and (payload[off+2]=0) and (payload[off+3]=1) then goto got_in_a;
+                    if quad_eq(payload[off],in_a) then goto got_in_a;
                     { otherwise skip past type(2)+class(2)+ttl(4) }
                     inc(off,8); 
                     { get RDLENGTH, skip past RDLENGTH and RDATA (of RDLENGTH length) }

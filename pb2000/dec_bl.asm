@@ -21,7 +21,7 @@ here:
     jr nz,copyloop ; else continue
     ; block copy, no replacements
     ldw $10, $2; $10 = wbuf
-    xr $7,$7 ; $7 = 0
+    byu $7; $7 = 0
     adw $10, $6 ; $10 = wbuf+len
     pre IY,$10  ; iy (block end) = wbuf + len
     bup         ; copy the block

@@ -54,10 +54,11 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-# Compiled ASM sources
+# Compiled inline ASM sources
 enc_bl.pas
 dec_bl.pas
 cksum.pas
+quad_eq.pas
 
 # Binaries + compiled sources
 pbnet

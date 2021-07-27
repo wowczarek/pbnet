@@ -1,6 +1,6 @@
 ASMC=./hd61700asm/hd61700
 ASMFLAGS=/s
-OUTFILES = enc_bl.pas dec_bl.pas cksum.pas
+OUTFILES = enc_bl.pas dec_bl.pas cksum.pas quad_eq.pas
 
 %.pas:%.asm
 	$(ASMC) $< $(ASMFLAGS)

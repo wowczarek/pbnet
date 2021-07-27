@@ -75,7 +75,7 @@ There are numerous other projects for 8-bit computers that include an Ethernet a
 |-------------|------------------------|---------------------------------------|-----------|
 | != READY    | [HOST-->PACKET-->PB]   | Queue packet or send ICMP unreachable | NO CHANGE |
 |  ->IDLE     | Initial state          | [HOST--ACK-->PB] once                 | NO CHANGE |
-|    IDLE     | [PB--[ACK,RTX]-->HOST] | PB ready to receive                   | ->READY   |
+|    IDLE     | [PB--RTX-->HOST]       | PB ready to receive                   | ->READY   |
 |    READY    | [PB--STX-->HOST]       | Stop accepting packets from host      | ->WRTX    |
 |    READY    | [HOST--PACKET-->PB]    | [TX BLOCK #1]                         | ->WACK    |
 |    WACK     | [PB--ACK-->HOST]       | [TX NEXT BLOCK...SEP]                 | ->WACK    |
@@ -170,9 +170,9 @@ The supported settings are:
 
 **NOTE 1:** *If you are happy with the defaults, there is no need for `pbnet.cfg` to exist.*
 
-**NOTE 2:** *The config file is parsed every time `pbn_init` is called, typically once in an application using PBNET.*
+**NOTE 2:** *The config file is parsed every time `pbn_init` is called, typically once in an application using PBNET, but it significantly contributes to startup delay*
 
-**NOTE 3:** *The config file parser takes up precious code space - it may need to be simplified to be less user-friendly, but more compact*
+**NOTE 3:** *The config file parser takes up precious code space - it may need to be simplified to be less user-friendly, but more compact, such as a compiled unit*
 
 #### Host side
 
