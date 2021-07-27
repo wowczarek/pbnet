@@ -8,9 +8,9 @@
 - Configuration file support on PB-2000: done
 - UDP sockets: done
 - DNS resolver (IN A only): done
-- Compiled binary so far: ~11 kB. Too much.
+- Compiled binary so far: ~10.6 kB. Still too much and no TCP yet, but more to be rewritten in ASM
 
-- Current mode: DNS resolver test
+**Current pbnet.exe mode: DNS resolver test**
 
 ## What is PBNET?
 
@@ -92,7 +92,7 @@ A `DEAD` state exists for any failures while transmitting and receiving, but its
 
 ## Project goals and limitations
 
-- **PBNET is a clean slate project**. It is nothing more than one guy's attempt to see what he can remember and put together from a set of classic RFCs. PBNET is not based on, nor is it influenced by, any existing minimal IP stack such as uIP/LwIP, etc. I intentionaly restrained myself from looking at those, but I have worked with the BSD sockets API extensively in the past, so some references are inevitable.
+- **PBNET is a clean slate project**. It is nothing more than one guy's attempt to see what he can remember and put together from a set of classic RFCs. PBNET is not based on, nor is it influenced by, any existing minimal IP stack such as uIP/LwIP, etc. I intentionaly restrained myself from looking at those, but I have worked with the BSD sockets API extensively in the past, so some references are inevitable. 
 
 - **PBNET will only support the absolute working minimum.** It does not aim for RFC compliance and working with every guideline that an IP stack should conform to. While I would be glad to implement all this, storage is limited and I have to cheat. On the PB-2000, PBNET will mostly silently drop packets when they are too big, fragmented, or otherwise not expected. This is actually not unusual today with firewalls everywhere, still it could be better.
 
