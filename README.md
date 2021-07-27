@@ -32,7 +32,7 @@ Shut your trap! It's a pocket 8-bit!1!!!1!
 
 Why, DL-Pascal of course! None of the ROMs available for the PB-2000 were compilers, even the C one is an interpreter, so, fast is what they are not. There is only one exception, and at the same time the only third-party ROM ever made for the PB-2000, which is DL-Pascal that was developed in 1989-1990 by Hans Larsson of Data-Larsson, Sweden. DL-Pascal is a proper, fully featured Pascal compiler, mostly compatible with Turbo Pascal 5.5 and QuickPascal 1.0, which supports inline assembly, building units (libraries), preprocessor, etc. DL-Pascal takes the PB-2000 to where Casio were never able to. The 64 kB ROM contains the compiler, a full screen editor with search/replace/cut/copy/move/goto capabilities, a menu-driven file manager, a debugger, a calculator / CLI mode with batch file support (basic "shell scripting") and more. Compiled binaries are small and code runs fast, and Pascal provides many features that other supported ROMs never did. DL-Pascal also came with a 300+ page grimoire of a manual.
 
-### Can I try?
+### Can I try it?
 
 Well, yes and no. If you're even reading this, chances are that you already have one, but otherwise, the Casio PB-1000 and PB-2000 are sought after by collectors, although can still semi regularly be found on eBay for a few hundred (enter currency here). The hardware is is one part.
 
