@@ -74,7 +74,7 @@ There are numerous other projects for 8-bit computers that include an Ethernet a
 | Start state | Trigger / Event        | Action / conditions / comments        | End state |
 |-------------|------------------------|---------------------------------------|-----------|
 | != READY    | [HOST-->PACKET-->PB]   | Queue packet or send ICMP unreachable | NO CHANGE |
-|  ->IDLE     | Initial state          | [HOST--ACK-->PB] once                 | NO CHANGE |
+|  ->IDLE     | Initial state          |                                       | NO CHANGE |
 |    IDLE     | [PB--RTX-->HOST]       | PB ready to receive                   | ->READY   |
 |    READY    | [PB--STX-->HOST]       | Stop accepting packets from host      | ->WRTX    |
 |    READY    | [HOST--PACKET-->PB]    | [TX BLOCK #1]                         | ->WACK    |
