@@ -56,7 +56,7 @@ type
     { an IP address - better this than a longint, really }
     ipaddr=quad;
     {tcp state}
-    tcp_state=(listen,synsent,synrecv,estab,finwait1,finwait2,closewait,closing,lastack,timewait,closed);
+    tcp_state=(none,listen,synsent,synrecv,estab,finwait1,finwait2,closewait,closing,lastack,timewait,closed);
     { a socket descriptor }
     socket=record
         state:tcp_state; { state (for TCP) }
@@ -125,7 +125,9 @@ type
     end;
 var 
     f:file; { serial port file descriptor }
-    _cmap:array [0..255] of byte; { symbol check map. could be a bit map (32 bytes), but it's not worth it, there's only a single bit shift instruction, it would be too slow }
+    { originally we only had cmap[0..255], now reduced to 0..31 + smap }
+    _cmap:array [0..31] of byte; { symbol check bit map }
+    _smap:array [0..7] of byte = (1,2,4,8,16,32,64,128);
     _wbuf:array [0..256] of byte; { rs232 block work buffer for rx/tx + sep }
     { control characters as variables, so they can be sent as is}
     pbc_sep:byte=pb_sep;pbc_ack:byte=pb_ack;pbc_stx:byte=pb_stx;pbc_rtx:byte=pb_rtx;
@@ -211,26 +213,33 @@ begin
   { set string result to a substring spos...epos }
   tl:=epos-spos+1;byte(r[0]):=tl;move(astr[spos],r[1],tl);trim:=r;
 end;
+{ strtok_r: find next token in ts, separated with c, starting from position _pos, write token start(st) and length (tl), return false if no more tokens }
+function next_tok(var ts:string; c:char; var _pos:byte; var st:byte; var tl:byte):boolean;
+var p,l:byte;
+begin
+    next_tok:=false;
+    l:=byte(ts[0]);
+    if _pos > l then exit;
+    p:=pos(c,ts,_pos);
+    if p=0 then p:=l+1;
+    tl:=p-_pos; st:=_pos; _pos:=p+1;
+    next_tok:=true;
+end;
 
 { parse an IP address from string into ipaddr - no range checks! returns 0 if all 4 octets parsed }
 function parse_ip(var v:string;var tgt:ipaddr):byte;
-var n,p,p1:byte;
+var n,p,l:byte;
+    p1:byte=1;
     os:string;
     i,j:byte;
 begin
     parse_ip:=1;
+    if not (length(v) in [7..15]) then exit; { shortest valid is 'n.n.n.n'=3+4*1=7, longest is 3+4*3=15 }
     i:=0;j:=0;
-    p:=pos('.',v);p1:=1;
-    while (p>0) and (i<4) do begin
-      p:=pos('.',v,p1);
-      if p=0 then begin
-        if i<3 then exit;
-        os:=copy(v,p1,kv_maxlen);
-      end else begin
-        os:=copy(v,p1,p-p1);p1:=p+1;
-      end;
+    while next_tok(v,'.',p1,p,l) and (l>0) and (i<4) do begin
+        os:=copy(v,p,l);
+        val(os,tgt[j],n); if n=0 then inc(j) else exit;
         inc(i);
-        val(os,tgt[j],n); if n=0 then inc(j);
     end;
     if j=4 then parse_ip:=0;
 end;
@@ -368,7 +377,7 @@ begin
 {$I cksum.pas}
 end;
 { encode a len-byte block within a packet into wbuf, using check map cmap, starting from offset pos }
-procedure enc_block(var pkt:array of byte;var cmap:array of byte;var wbuf:array of byte;pos:word;len:word);
+procedure enc_block(var pkt:array of byte;var cmap:array of byte;var wbuf:array of byte;pos:word;len:word;var smap:array of byte);
 begin
 {$I enc_bl.pas}
 end;
@@ -436,13 +445,13 @@ begin
 
     { encode and send block by block }
     while left>bsize do begin
-        enc_block(pkt.data, _cmap,_wbuf,pos, bsize);
+        enc_block(pkt.data, _cmap,_wbuf,pos, bsize,_smap);
         blockwrite(f,_wbuf,blsize);
         dec(left, bsize);
         inc(pos,  bsize);
     end;
     { handle the  / last block }
-    enc_block(pkt.data, _cmap, _wbuf,pos, left);
+    enc_block(pkt.data, _cmap, _wbuf,pos, left,_smap);
     { end of packet:send pb_mcn+left+pb_sep }
     inc(left,pb_mcn);
     _wbuf[left]:=pb_sep;inc(left);
@@ -628,6 +637,12 @@ begin
     udp_send:=pkt_send(pkt,t);
 end;
 
+function tcp_connect(var pkt:ippkt;var sock:socket;t:word):shortint;
+
+begin
+end;
+
+
 { clean up a hostname string and append search domain if no dots }
 function hname_cleanup(var shost:string): boolean;
 var i:byte;
@@ -649,7 +664,7 @@ id:word;
 res: shortint;
 anssect: boolean=false;
 off:byte;
-len,ps,ps1,retries:byte;
+l,ps,ps1,retries:byte;
 sock: socket;
 rcount:word=0;
 rdlength:word=0;
@@ -690,23 +705,20 @@ retry:
     { part 2: populate the query section }
         { place every token/subdomain in the packet as a label (length byte+string) }
         ps1:=1;
-        repeat
-            ps:=pos('.',shost,ps1);
-            if ps=0 then ps:=length(shost)+1;
-            len:=ps-ps1;
-            payload[off]:=len; inc(off);
-            move(shost[ps1],payload[off],len);
-            inc(off,len); ps1:=ps+1;
-        until ps>length(shost);
-        { add null label (root) + two zero words for type and class }
-        fillchar(payload[off],5,0);
-        { set query to IN A }
-        inc(off,2); payload[off]:=1; { QTYPE=0x0001=A}
-        inc(off,2); payload[off]:=1; { QCLASS=0x0001=IN }
-        inc(off);
+        while next_tok(shost,'.',ps1,ps,l) do begin
+            if l>0 then begin
+                payload[off]:=l; inc(off);
+                move(shost[ps],payload[off],l);
+                inc(off,l);
+            end;
+        end;
+        { add null label (root) }
+        payload[off]:=0;
+        { set query class/type to IN A }
+        move(in_a,payload[off+1],4);
     end;
     { send the query, retry if need be }
-    pkt.l4_len:=off;
+    pkt.l4_len:=off+5; { 5 for root,type,class }
     res:=udp_send(pkt,sock,timeout);
     if res<>e_ok then begin
         if retries > 0 then begin
@@ -716,7 +728,7 @@ retry:
         dns_resolve:=res;
         exit;
     end;
-    { reset the retries counter }
+    { we do a separate run of retries for RX }
     retries:=retr;
 rxretry:
     pkt_ready; { tell the host that we can receive stuff now }
@@ -805,8 +817,7 @@ begin
     pbn_init:=false;
     { initialise, erm, things }
     bsize:=blsize-pb_mcn;
-    rxcnt:=0;
-    txcnt:=0;
+    rxcnt:=0; txcnt:=0;
     { load the config }
     if not readconfig then exit;
     assign(f,'COM:'+baud+'N81NNN.NN'); { open serial port }
@@ -828,10 +839,11 @@ begin
     ps:=trim(ps);
     if ps='.' then begin
         writeln('malformed hostname: ',ps);
+        exit;
     end;
     if not pbn_init then exit;
     writeln('looking up ',ps,'...');
-    r:=dns_resolve(ps,ip,pkt,50,3);
+    r:=dns_resolve(ps,ip,pkt,30,3);
     if r=e_ok then begin
         write(ps,' is: '); print_ipaddr(ip);
         writeln;
