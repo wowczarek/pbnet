@@ -127,7 +127,7 @@ var
     f:file; { serial port file descriptor }
     { originally we only had cmap[0..255], now reduced to 0..31 + smap }
     _cmap:array [0..31] of byte; { symbol check bit map }
-    _smap:array [0..7] of byte = (1,2,4,8,16,32,64,128);
+    _smap:array [0..7] of byte = (128,64,32,16,8,4,2,1); { bit shift map, because there is no 1+ bit shift op }
     _wbuf:array [0..256] of byte; { rs232 block work buffer for rx/tx + sep }
     { control characters as variables, so they can be sent as is}
     pbc_sep:byte=pb_sep;pbc_ack:byte=pb_ack;pbc_stx:byte=pb_stx;pbc_rtx:byte=pb_rtx;
@@ -492,11 +492,11 @@ begin
             c:=rs232_buf[rs232_pos-1];
             blockread(f, _wbuf[bpos],br);
             if c=pb_sep then dec(br);
+            { restart the timer on first byte, to prevent timing out once we started receiving }
+            if (bpos=0) and (timeout>0) then timerstart(timer_no,timeout);
             inc(bpos,br);
             { assembled a full block }
             if bpos=blsize then begin
-                { restart the timer for next block }
-                if timeout>0 then timerstart(timer_no,timeout);
                 if (plen+bsize)>pb_mtu then begin
                     pkt_get:=e_mtu;
                     exit;
@@ -827,6 +827,19 @@ begin
     pbn_init:=true;
 end;
 
+procedure icmp_test;
+var pkt:ippkt;
+r:shortint;
+begin
+    if not pbn_init then exit;
+    repeat
+        pkt_ready;
+        r:=pkt_get(pkt,30);
+        if r=e_intr then exit;
+        if r=e_ok then r:=echo_respond(pkt,30);
+    until false;
+end;
+
 procedure dns_test;
 var
 pkt:ippkt;
@@ -841,7 +854,6 @@ begin
         writeln('malformed hostname: ',ps);
         exit;
     end;
-    if not pbn_init then exit;
     writeln('looking up ',ps,'...');
     r:=dns_resolve(ps,ip,pkt,30,3);
     if r=e_ok then begin
@@ -851,6 +863,6 @@ begin
 end;
 
 begin
-    dns_test;
+    icmp_test;
 end.
 
