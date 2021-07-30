@@ -518,9 +518,10 @@ begin
                     { decode the remaining data and acknowledge }
                     dec_block(pkt.data, _wbuf, plen, bpos);
                     blockwrite(f,pbc_ack,1);
+                    inc(plen,bpos); dec(plen,pb_mcn);
                 end;
                 pkt_hold; { tell the other end to stop transmitting while we process }
-                pkt.len:=plen+bpos-pb_mcn;bpos:=0;plen:=0;
+                pkt.len:=plen;bpos:=0;plen:=0;
                 goto have_pkt;
             end;
         end;
