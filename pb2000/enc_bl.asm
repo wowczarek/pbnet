@@ -62,10 +62,10 @@ cmloop:
 sbw $10,$30                 ; dec left
 jr nz, cmloop               ; any left? repeat
 
-; if there are no reserved bytes in the bitmap, there is no need for substitution
+; special case 1: if there are no reserved bytes in the bitmap, there is no need for substitution
 miccheck:
     ld $16,($2)            ; $16 = cmap[0];
-    anc $16, &hf0          ; check if 4 "left" bits in cmap[0] are 0
+    anc $16, &hf0          ; check if 4 upper bits in cmap[0] are 0
     jr nz, maccheck        ; nope: try the other special case
     ; yes: fill replacements with ffff (sub1=sub2 is checked on the other end)
     pre IZ, $4              ; IZ = wbuf
@@ -80,12 +80,12 @@ miccheck:
     pre IY,$10              ; iy (block end) = pkt + pos + len
     bup                     ; copy the block
     jr done	                ; the end
-; check if last 4 bytes are unused
+; special case 2: if last 4 bytes are unused, they can be uses as substitutes straight away
 maccheck:
-    ld $15, $2              ; $15 = cmap
-    ad $15, &hff            ; cmap+=255
-    ld $16, ($15)           ; $16 = cmap[255];
-    anc $16, &h0f           ; check if 4 lower bits in cmap[255] are 0
+    ldw $16, 31             ; $16..$17 = 31
+    adw $16, $2             ; $16 = cmap + 31
+    ld $15, ($16)           ; $15 = cmap[31];
+    anc $15, &h0f           ; check if 4 lower bits in cmap[31] are 0
     jr nz, findsub          ; nope: find substitutes as usual
     ; yes: just use fc,fd,fe,ff as substitutes
     pre IZ, $4              ; IZ = wbuf
@@ -105,9 +105,13 @@ findsub:
     biu $12
     biu $12
     biu $12
-    ld $17,4,jr fsiloop     ; start in inner loop with 4 bits left
+    ld $17,4,jr fsiloop     ; start in inner loop with 4 bits left (skip reserved bytes 0..3)
 fsloop:                     ; outer loop: move up in cmap
     ldi $12, (IX+$31)       ; c = cmap++
+
+    ; [there could be a shortcut here: upper or lower nibble of c is zero, we have 4 substitutes in one go]
+    ; anc $12,&hff, jr uz..., jr nlz ...
+
     ld $17,8                ; b = 8 (8 bits left to shift)
 fsiloop:                    ; inner loop: shift bits in cmap[i]
     ad $14, $30             ; i++
