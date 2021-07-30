@@ -421,9 +421,8 @@ begin
         case ip.proto of
             ipr_icmp:begin
                 inc(plen, icmp_hlen);
-                { compute ICMP checksum }
-                icmp.csum:=0;
-                icmp.csum:=pkt_checksum(payload, 0, plen);
+                { compute ICMP checksum, unless we were given one }
+                if icmp.csum=0 then icmp.csum:=pkt_checksum(payload, 0, plen);
             end;
             ipr_udp:begin
                 inc(plen,udp_hlen);
@@ -566,6 +565,7 @@ end;
 function echo_respond(var pkt:ippkt; t:word): shortint;
 var
 tmpaddr:ipaddr;
+cs:word;
 begin
     with pkt do begin
         if (ip.proto=ipr_icmp) and (icmp.mtype=icmp_mecho) then begin
@@ -574,6 +574,11 @@ begin
             tmpaddr:=ip.dst;
             ip.dst:=ip.src;
             ip.src:=tmpaddr;
+            { add 0x0800 to checksum and extra 1 on carry, that's it. still slow because of the swaps. }
+            cs:=swap(icmp.csum);
+            inc(cs,$0800);
+            if cs < swap(icmp.csum) then inc(cs);
+            icmp.csum:=swap(cs);
             echo_respond:=pkt_send(pkt,t);
         end else echo_respond:=e_unxp;
     end;
