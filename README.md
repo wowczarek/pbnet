@@ -10,7 +10,7 @@
 - DNS resolver (IN A only): done
 - Compiled binary so far: ~10.6 kB. Still too much and no TCP yet, but more to be rewritten in ASM
 
-**Current pbnet.exe mode: DNS resolver test**
+**Current pbnet.exe mode: ICMP echo reply test (run with 'icmp' parameter) or DNS resolver test (run with 'resolve <host>' parameter)**
 
 ## What is PBNET?
 
