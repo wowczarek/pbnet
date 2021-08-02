@@ -7,10 +7,12 @@ BASE: EQU &H7000
 START here
 ORG BASE
 here:
+
+    gre IX, $18             ; save IX
+
     ; $0..$1 = pkt, $2..$3 = wbuf, $4..$5 = pos, $6 = len
     ldm $0, (IX + $31), 7   ; load first 4 args into $0...$6
     ; we are done with IX for now, store it until near exit
-    gre IX, $18             ; save IX
 
     adw $0,$4               ; add offset (pos) to packet address
     pre IZ, $0              ; put packet data address into IZ, pkt
@@ -36,11 +38,11 @@ copyloop:
 sub1:
     xrc $12, $8             ; if c = sub1
     jr nz, sub2
-    ld $12, 0, jr bytedone  ; then c = 0
+    ld $12, $31, jr bytedone  ; then c = 0
 sub2:
     xrc $12, $9             ; if c = sub2
     jr nz, sub3
-    ld $12, 1, jr bytedone  ; then c = 1
+    ld $12, $30, jr bytedone  ; then c = 1
 sub3:
     xrc $12, $10            ; if c = sub3
     jr nz, sub4
@@ -52,6 +54,6 @@ sub4:
 bytedone:
     sti $12, (IZ+$31)       ; *pkt++ = c
     sb $6,$30               ; len--
-    jr nz, copyloop
+    jr nz, copyloop         ; if len > 0 then repeat
 done:
     pre IX, $18             ; restore IX
