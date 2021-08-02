@@ -30,7 +30,6 @@ here:
     stim $14, (IX+$31), 8
     stim $14, (IX+$31), 8
     pre IX, $2              ; reset IX, IX = cmap
-
     ldw $10,$8              ; copy len into $10
 
 ; check and mark bytes present in block
@@ -42,25 +41,26 @@ cmloop:
     ; instead we have this:
 
     ; === oneliner start
-    ; split c into 5 upper bits (n) and 3 lower bits (b)
+    ; split c into 5 upper bits (c) and 3 lower bits (b)
     byu $18                 ; b[hi] = 0
     ld $17,$12              ; b[lo] = c
     an $17,&h07             ; clear upper 5 bits in b[lo]
-    ld $13,$12              ; n=c>>3
-    bid $13                 ; no bid $13,3, come on Hitachi...
-    bid $13
-    bid $13
+    bid $12                 ; c>>=3. no bid $12,3, come on Hitachi...
+    bid $12
+    bid $12
     ; set bit b in cmap[n]
-    ; $13=cmap index=c, $17=bit index
-    ld $14,(IX+$13)         ; $14 = cmap[n]
+    ; $12=cmap index=c, $17=bit index
+    ld $14,(IX+$12)         ; $14 = cmap[n]
     adw $17, $6             ; $17 = &smap[b]
     ld  $19, ($17)          ; $19 = smap[b], temp
     or $14,$19              ; $14 |= smap[b]
-    st $14,(IX+$13)         ; cmap[n] = $14
+    st $14,(IX+$12)         ; cmap[n] = $14
     ; === oneliner end
 
 sbw $10,$30                 ; dec left
 jr nz, cmloop               ; any left? repeat
+
+; mic = min character, mac = max character. the loop above used to track these, now we just check the bitmap
 
 ; special case 1: if there are no reserved bytes in the bitmap, there is no need for substitution
 miccheck:
@@ -109,7 +109,7 @@ findsub:
 fsloop:                     ; outer loop: move up in cmap
     ldi $12, (IX+$31)       ; c = cmap++
 
-    ; [there could be a shortcut here: upper or lower nibble of c is zero, we have 4 substitutes in one go]
+    ; [there could be a shortcut here: if upper or lower nibble of c is zero, we have 4 substitutes in one go]
     ; anc $12,&hff, jr uz..., jr nlz ...
 
     ld $17,8                ; b = 8 (8 bits left to shift)
@@ -133,22 +133,22 @@ havesub:
     adw $10,$4              ; add wbuf
     pre IZ, $10             ; IZ = wbuf + 4;
     pre IX, $0              ; IX = pkt
+    ; from this point we don't need $0 anymore, so we can reuse it
+    byu $1                  ; clear $1 for later (byte->word with $0)
     ldw $10, $8             ; loop counter = left
-    ld $15,4                ; constant
-    byu $13                 ; clear $13 for later (byte->word with $12)
+    ld $15, 3               ; constant = 3
 
 ; do the substitutions
 subloop:
-    ldi $12, (IX+$31)       ; c = pkt++
-    sbc $12, $15            ; if c < 4
-    jr nc, nosub            ; else ->
-    ldw $8, $4              ; $8 = wbuf
-    adw $8, $12             ; $8 = wbuf + c
-    ld $12,($8)             ; c = wbuf[c];
-    nosub:                  ; -> else
-    sti $12, (IZ+$31)       ; wbuf[4] = c, wbuf++
-    sbw $10,$30             ; if i left < 0
+    ldi $0, (IX+$31)        ; c = pkt++
+    sbc $15, $0             ; if c <= 3. in this order, because $0 gets optimised to $Z, and sbc($C5,SIR)=9 cycles where sbc($C5,$C5)=12.
+    jr c, nosub             ; then no substitution, just store this byte
+    ldw $8, $4              ; $8 = wbuf      \
+    adw $8, $0              ; $8 = wbuf + c   |-- if only we had another index register II, we would just do ld $c,(II+$0)
+    ld $0,($8)              ; c = wbuf[c]    /
+    nosub:                  ; store the byte:
+    sti $0, (IZ+$31)        ; wbuf[4] = c, wbuf++
+    sbw $10,$30             ; if left > 0
     jr nz, subloop          ; then repeat
-
 done:
     pre IX, $22             ; restore IX
