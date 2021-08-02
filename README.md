@@ -16,11 +16,10 @@
 
 DL-Pascal is great, but the machine code it produces is bloated, plus it's Pascal. Only way to reduce binary size is to write more in assembly:
 
-- What in C would be shift operators, in DL-Pascal are functions, meaning that there is loading of parameters and several jumps, and then finally a loop(!), because HD61700 only supports single bit shifts.
-- Mathematical expressions produce lots of machine code. For example: a := a + 5 produces 7 bytes more than inc(a,5)
-- Function call overhead is noticable, and so is the machine code increase from declaring functions (~30 bytes). Anything that is single-use, should not be a function - basically inlining is what we need. An example is the checksum function which itself is about 50 bytes of machine code, including loading of arguments, where declaring it and calling it uses more machine code than it probably would if it was fully inlined.
-- A DL-Pascal cross-compiler would be the best way to go if we want to optimise things - or at least initially a macro processor that would speed up certain operations and produce less machine code. Shifts, swaps, increments and such should be asm macros, not functions!
-
+- What in C would be shift operators, in DL-Pascal are functions, meaning that there is loading of parameters and several jumps, and then finally a loop(!), because HD61700 does not support arbitrary bit shifts - only 4-bit shifts (`diX`) and 1-bit shifts (`biX`)
+- Mathematical expressions produce lots of machine code. For example: a := a + 5 produces 7 bytes more than inc(a,5), and even at that, inc() is a function!
+- Function call overhead is noticable, and so is the machine code increase from declaring functions (~30 bytes). Anything that is single-use, should be inlined. An example is the checksum function which itself is about 50 bytes of machine code, including loading of arguments, where declaring it and calling it uses more machine code than it probably would if it was fully inlined
+- A DL-Pascal cross-compiler would be the best way to go if we wanted to optimise things - or at least initially a macro processor that would speed up certain operations and produce less machine code. Shifts, swaps, increments and such should be asm macros
 
 ## What is PBNET?
 
