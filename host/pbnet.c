@@ -344,7 +344,7 @@ static void handle_timer(struct pbnet *pb) {
                 sp_setstate(pb, PB_IDLE);
                 break;
         case PB_READY:
-                dprintf(PB_DSTATE, "[     STATE] READY timeout, liveness check\n");
+                dprintf(PB_DSTATE, "[     STATE] READY timeout\n");
                 sp_setstate(pb, PB_IDLE);
                 break;
         case PB_IDLE:
