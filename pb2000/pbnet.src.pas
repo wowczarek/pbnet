@@ -17,7 +17,7 @@ const
     def_blsize=224; { block size }
     { error constants }
     e_ok=0; e_tmo=-1; e_intr=-2; e_trunc=-3;
-    e_crc=-4; e_mtu=-5; e_unxp=-6; e_err=-7;
+    e_crc=-4; e_mtu=-5; e_unxp=-6; e_err=-7; e_init=-8;
     { control characters }
     pb_sep=0;
     pb_ack=1;
@@ -125,6 +125,7 @@ type
     end;
 var 
     f:file; { serial port file descriptor }
+    _init:boolean=false; { pbnet initialised }
     { originally we only had cmap[0..255], now reduced to 0..31 + smap }
     _cmap:array [0..31] of byte; { symbol check bit map }
     _smap:array [0..7] of byte = (128,64,32,16,8,4,2,1); { bit shift map, because there is no 1+ bit shift op }
@@ -156,6 +157,7 @@ function strerr(e:shortint): string;
 var se:string[8];
 begin
     case e of
+        e_init:     se:='E_INIT';
         e_err:      se:='E_ERR';
         e_unxp:     se:='E_UNXP';
         e_mtu:      se:='E_MTU';
@@ -395,13 +397,13 @@ end;
 { don't send us anything for now }
 procedure pkt_hold;
 begin
-    blockwrite(f, pbc_stx, 1); { stop transmission }
+    if _init then blockwrite(f, pbc_stx, 1); { stop transmission }
 end;
 
 { call this once a packet has been handled or responded to (resume transmision) }
 procedure pkt_ready;
 begin
-    blockwrite(f, pbc_rtx, 1); { resume transmission }
+    if _init then blockwrite(f, pbc_rtx, 1); { resume transmission }
 end;
 
 
@@ -414,6 +416,10 @@ pos:word=0;
 n:byte;i:byte;
 label etmo; label eok;
 begin
+    if not _init then begin;
+        pkt_send:=e_init;
+        exit;
+    end;
     pkt_send:=e_ok;
     { populate length fields and compute checksums }
     with pkt do begin
@@ -483,6 +489,10 @@ label trunc;
 label tmout;
 label intr;
 begin
+    if not _init then begin;
+        pkt_get:=e_init;
+        exit;
+    end;
     if timeout>0 then timerstart(timer_no,timeout);
     repeat
         br:=rs232_cnt;
@@ -494,35 +504,24 @@ begin
             { restart the timer on first byte, to prevent timing out once we started receiving }
             if (bpos=0) and (timeout>0) then timerstart(timer_no,timeout);
             inc(bpos,br);
-            { assembled a full block }
-            if bpos=blsize then begin
-                if (plen+bsize)>pb_mtu then begin
-                    pkt_get:=e_mtu;
-                    exit;
-                end;
-                { decode the block and acknowledge }
-                dec_block(pkt.data,_wbuf,plen,bpos);
-                blockwrite(f,pbc_ack,1);
-                inc(plen, bsize);
-                bpos:=0;
-            end;
-            { got SEP, end of packet }
-            if c=pb_sep then begin
-                { there is data to decode = block shorter than block size = last block }
-                if bpos>0 then begin
-                    if bpos<pb_mcn then goto trunc;
+            { assembled a full block or got SEP }
+            if (bpos=blsize) or (c=pb_sep) then begin
+                if(bpos>0) then begin
                     if (plen+bpos-pb_mcn)>pb_mtu then begin
                         pkt_get:=e_mtu;
                         exit;
                     end;
-                    { decode the remaining data and acknowledge }
-                    dec_block(pkt.data, _wbuf, plen, bpos);
+                    { decode the block or remaining data and acknowledge }
+                    dec_block(pkt.data,_wbuf,plen,bpos);
                     blockwrite(f,pbc_ack,1);
-                    inc(plen,bpos); dec(plen,pb_mcn);
+                    inc(plen, bpos); dec(plen,pb_mcn);
                 end;
-                pkt_hold; { tell the other end to stop transmitting while we process }
-                pkt.len:=plen;bpos:=0;plen:=0;
-                goto have_pkt;
+                bpos:=0;
+                if c=pb_sep then begin
+                    pkt_hold; { tell the other end to stop transmitting while we process }
+                    pkt.len:=plen;plen:=0;
+                    goto have_pkt;
+                end;
             end;
         end;
         if (timeout>0) and timerout(timer_no) then goto tmout;
@@ -814,8 +813,10 @@ end;
 { shut down and clean up }
 procedure pbn_shutdown;
 begin
+    if not _init then exit;
     pkt_hold; { tell the host to stop transmitting }
     close(f);
+    _init:=false;
 end;
 { initialise pbnet }
 function pbn_init:boolean;
@@ -831,19 +832,23 @@ begin
     randomize; { ooh, InfoSec! }
     ip_id:=random($FFFF); { ooh, fancy! }
     pbn_init:=true;
+    _init:=true;
 end;
 
 procedure icmp_test;
 var pkt:ippkt;
 r:shortint;
+label en;
 begin
     if not pbn_init then exit;
     repeat
         pkt_ready;
         r:=pkt_get(pkt,30);
-        if r=e_intr then exit;
+        if r=e_intr then goto en;
         if r=e_ok then r:=echo_respond(pkt,30);
     until false;
+en:
+    pbn_shutdown;
 end;
 
 procedure dns_test;
@@ -853,22 +858,41 @@ r:shortint;
 ps:string;
 ip:ipaddr;
 begin
-    if (paramcount=0) then exit;
-    ps:=paramstr(1);
+    ps:=paramstr(2);
     ps:=trim(ps);
     if ps='.' then begin
         writeln('malformed hostname: ',ps);
         exit;
     end;
+    if not pbn_init then exit;
     writeln('looking up ',ps,'...');
     r:=dns_resolve(ps,ip,pkt,30,3);
     if r=e_ok then begin
         write(ps,' is: '); print_ipaddr(ip);
         writeln;
     end else writeln('dns_resolve error: ',strerr(r));
+    pbn_shutdown;
 end;
 
+label usage;
 begin
-    icmp_test;
-end.
+    if (paramcount<1) then goto usage;
 
+    if paramstr(1)='icmp' then begin
+        writeln('ICMP echo request responder started');
+        icmp_test;
+        exit;
+    end else if paramstr(1)='ns' then begin
+        if paramcount<2 then begin
+            writeln('resolve: hostname required');
+            exit;
+        end;
+        dns_test;
+        exit;
+    end;
+
+usage:
+        writeln('usage: ',paramstr(0),' [icmp | ns <host> ]');
+        exit;
+
+end.
