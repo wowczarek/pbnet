@@ -8,9 +8,19 @@
 - Configuration file support on PB-2000: done
 - UDP sockets: done
 - DNS resolver (IN A only): done
-- Compiled binary so far: ~10.6 kB. Still too much and no TCP yet, but more to be rewritten in ASM
+- Compiled binary/library so far: 10.4 kB. Still too much and no TCP yet, but more to be rewritten in asm
 
-**Current pbnet.exe mode: ICMP echo reply test (run with 'icmp' parameter) or DNS resolver test (run with 'resolve <host>' parameter)**
+**Current pbnet.exe mode: ICMP echo reply test (run with 'icmp' parameter) or DNS resolver test (run with 'ns <host>' parameter)**
+
+#### Work notes
+
+DL-Pascal is great, but the machine code it produces is bloated, plus it's Pascal. Only way to reduce binary size is to write more in assembly:
+
+- What in C would be shift operators, in DL-Pascal are functions, meaning that there is loading of parameters and several jumps, and then finally a loop(!), because HD61700 only supports single bit shifts.
+- Mathematical expressions produce lots of machine code. For example: a := a + 5 produces 7 bytes more than inc(a,5)
+- Function call overhead is noticable, and so is the machine code increase from declaring functions (~30 bytes). Anything that is single-use, should not be a function - basically inlining is what we need. An example is the checksum function which itself is about 50 bytes of machine code, including loading of arguments, where declaring it and calling it uses more machine code than it probably would if it was fully inlined.
+- A DL-Pascal cross-compiler would be the best way to go if we want to optimise things - or at least initially a macro processor that would speed up certain operations and produce less machine code. Shifts, swaps, increments and such should be asm macros, not functions!
+
 
 ## What is PBNET?
 
@@ -92,6 +102,8 @@ A `DEAD` state exists for any failures while transmitting and receiving, but its
 
 ## Project goals and limitations
 
+- **PBNET requires DL-Pascal**. I admit that this severely limits the reach of this project. DL-Pascal however is the only environment available for the PB-2000 that allows building libraries and linking with them. Significant parts of PBNET are either already written in assembly or will be rewritten into assembly, but the interface is still via Pascal functions. Yes, I could write an all-assembly blob that someone could use to write applications for other ROMs than DL-Pascal, but this means mostly single-use applications. The goal is to provide a network API, not one application, but I may review this in the future since the majority of PB-2000C/AI-1000 owners only have the plain C/LISP ROM or BASIC. Even if you need to bundle a ton of machine code with your project, I suppose that is still an API - but what's the use if you have to write it all in assembly...
+
 - **PBNET is a clean slate project**. It is nothing more than one guy's attempt to see what he can remember and put together from a set of classic RFCs. PBNET is not based on, nor is it influenced by, any existing minimal IP stack such as uIP/LwIP, etc. I intentionaly restrained myself from looking at those, but I have worked with the BSD sockets API extensively in the past, so some references are inevitable. 
 
 - **PBNET will only support the absolute working minimum.** It does not aim for RFC compliance and working with every guideline that an IP stack should conform to. While I would be glad to implement all this, storage is limited and I have to cheat. On the PB-2000, PBNET will mostly silently drop packets when they are too big, fragmented, or otherwise not expected. This is actually not unusual today with firewalls everywhere, still it could be better.
@@ -110,15 +122,17 @@ A `DEAD` state exists for any failures while transmitting and receiving, but its
 
 - **The host side uses a very shallow transmit queue, by default limited to 5 packets.** This prevents from queuing endlessly just to have the PB-2000 respond after tens of seconds.
 
-- **There is no support for receiving multicast**. You can transmit multicast without issues, but for it to leave your host, you need multicast routing. "Why would you need multicast?!" is not the right question here - multicast could be needed for things like IoT integration/control or something else. It's just the fact that we would either need to support IGMP (and then probably PIM on the host), or statically subscribe to selected multicast groups via the host, listen on the host and forward to PB. Doable, but it's extra code and I'm not sure if it's worth the effort.
+- **There is no support for receiving multicast**. You can *transmit* multicast without issues, but for it to leave your host, you need multicast routing. "Why would you need multicast?!" is not the right question here - multicast could be needed for things like IoT integration/control or something else. It's just the fact that we would either need to support IGMP (and then probably PIM on the host), or statically subscribe to selected multicast groups via the host, listen on the host and forward to PB. Doable, but it's extra code and I'm not sure if it's worth the effort.
 
 ## Throughput
 
-With the core routines (block encoding, decoding and checksums) written in HD61700 assembly, processing is already not the limiting factor and the framing overhead is low (4 bytesper 240 bytes + SEP). Piotr Piatek's USB serial module is speed-limited on the RX side and maximum rates PBNET achieves are about 250 Bps RX + ~530 Bps TX. With the FTDI chip buffering, we don't have to worry about the speed with which we write to PB's port, but for use with Casio serial interfaces, PBNET uses staggered transmit and a fixed delay is added per byte (`-l` option, microseconds, default is 1000 = 1 ms). This does not affect the preformance via the  USB interface, but allows uninterrupted transmission with the FA-7 or MD-100. This was tested by Piotr Piatek with an MD-100 and rates were 400+ Bps RX, 700+ Bps TX. With Piotr's USB module, we achieve ~250 Bps RX (limited by the module), and ~530 Bps TX.
+With the core routines (block encoding, decoding and checksums) written in HD61700 assembly, processing is already not the limiting factor and the framing overhead is low (4 bytesper 240 bytes + SEP). Piotr Piatek's USB serial module is speed-limited on the RX side and maximum rates PBNET achieves are about 250 Bps RX + ~530 Bps TX. With the FTDI chip buffering, we don't have to worry about the speed with which we write to PB's port, but for use with Casio serial interfaces, PBNET uses staggered transmit and a fixed delay is added per byte (`-l` option, microseconds, default is 1000 = 1 ms). This does not affect the preformance via the  USB interface, but allows uninterrupted transmission with the FA-7 or MD-100. This was tested by Piotr Piatek with an MD-100 and rates were 400+ Bps RX, 700+ Bps TX. With Piotr's USB module, we achieve ~250 Bps RX (limited by the module), and ~517 Bps TX (was ~530, but dropped since the PB now waits for an ACK after sending a packet). At this stage, optimising the encoding and decoding code further yields little improvement, the majority of delays are on the serial port side - both hardware and RX/TX code in the ROM.
 
-## Protocol support and features.
+## Protocol support and features
 
-PBNET supports (will support) ICMP, UDP and TCP, and has a very basic (non-recursive!) DNS resolver, which only handles IN A records. A simple TFTP server and a `net` tool (resolver, ping, show config) will probably be developed before TCP.
+PBNET supports (will support) ICMP, UDP and TCP, and has a very basic DNS resolver (see below). A simple TFTP server and a `net` tool (resolver, ping, show config) will probably be developed before TCP.
+
+*Notes on DNS resolver*: The resolver is non-recursive, only handles IN A records (no reverse lookups, just returns back the IP address), and does not cache the results. Maintaining cache lifetime is difficult if you run the app/library on demand without a reliable real-time clock and with only three timers available to the user and how they are implemented. Best thing we could do is cache a result for n calls rather than n seconds.
 
 ## Future plans / items under consideration
 
@@ -166,7 +180,7 @@ The supported settings are:
 - `dns=<e.f.g.h>`: IP address of the DNS resolver - only one
 - `blocksize=<16..224>`: best to leave at default value (224), also must match on the host side!
 - `ttl=<1..255>`: IP Time To Live (hop limit) set in packets generated by the PB. Default is 64.
-- `checksums=<tTyYfFnN>`: enable or disable checksum calculation and validation on the PB, default is true.
+- `checksums=<tTyYfFnN>`: enable or disable checksum calculation and validation on the PB, default is true. *[not implemented yet, we correct the ICMP checksum but set UDP checksum to 0]*
 
 **NOTE 1:** *If you are happy with the defaults, there is no need for `pbnet.cfg` to exist.*
 
