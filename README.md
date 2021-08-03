@@ -214,9 +214,9 @@ On the host side, just run the `pbnet` binary with correct arguments.
 
 ##### Structures (records) and data types #####
 
-*PBNET uses a combined `ippkt` record* which uses Pascal's variants (like C's unions) to hold all protocol headers and payload. The `case` statemens are just DL-Pascal's way to declare variants.
+**PBNET uses a combined `ippkt` record** which uses Pascal's variants (like C's unions) to hold all protocol headers and payload. The `case` statemens are just DL-Pascal's way to declare variants.
 
-*The packet record* looks as follows: 
+**The packet record** looks as follows: 
 
 ```pascal
 type
@@ -238,7 +238,7 @@ type
 
 This record is of a fixed size of 1500 bytes *total* (plus `len` and `l4_len` fields). Normally, only one `ippkt` variable is required for all operations. The `l4_len` field contains the payload length for the given protocol (ICMP, UDP, TCP) and is set automatically on packet receipt, and on transmission, this field is used to indicate the payload size we want to send with the given protocol.
 
-*Protocol headers* are defined as follows:
+**Protocol headers** are defined as follows:
 
 ```pascal
 const
@@ -295,7 +295,7 @@ type
 
 ```
 
-The *payload* (variable `pkt` for illustration) can be accessed as:
+The **payload** (variable `pkt` for illustration) can be accessed as:
 
 - `pkt.data`: raw packet (IP payload + IPv4 header)
 - `pkt.ip.payload`: IPv4 payload
@@ -303,7 +303,7 @@ The *payload* (variable `pkt` for illustration) can be accessed as:
 - `pkt.icmp.payload`: ICMP payload
 - `pkt.tcp.payload`: TCP payload
 
-The *socket* is defined as follows:
+The **socket** is defined as follows:
 
 ```pascal
     {tcp state}
@@ -319,7 +319,7 @@ The *socket* is defined as follows:
 
 Instead of *source* and *destination* (port, address) we look at *remote* and *local*.
 
-Extra constants / special variables are:
+Extra **constants** / special variables are:
 
 ```pascal
 const
