@@ -40,7 +40,7 @@ Table of contents
 
 
 
-## PROGRESS
+## PROGRESS [#progress]
 
 - Packet encoding and decoding: done
 - Rewritten enc_block, dec_block and pkt_checksum to ASM: done
