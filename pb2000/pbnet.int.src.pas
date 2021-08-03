@@ -8,7 +8,9 @@ const
     e_ok=0;   e_tmo=-1;  e_intr=-2; e_trunc=-3; e_crc=-4;
     e_mtu=-5; e_unxp=-6; e_err=-7;  e_init=-8; e_arg=-9;
     { IP protocol numbers }
-    ipr_icmp=1; ipr_udp =17; ipr_tcp =6;
+    ipr_zero=0; ipr_icmp=1; ipr_udp =17; ipr_tcp =6;
+    { header lengths }
+    ip_hlen=20; icmp_hlen=8; udp_hlen=8; tcp_hlen=20;
     { ICMP types }
     icmp_mecho=8; icmp_mechoreply=0;
     { DNS return codes (RCODE) }
@@ -48,8 +50,8 @@ type
         mtype:byte;
         mcode:byte;
         csum:word;
-        id:word;
-        seq:word;
+        id:word; { belongs to ICMP echo, just here for convenience }
+        seq:word; { belongs to ICMP echo }
         payload:array [0..1471] of byte;
     end;
     { UDP header + payload }

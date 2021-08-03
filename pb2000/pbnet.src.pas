@@ -19,15 +19,8 @@ const
     pb_ack=1;
     pb_stx=2;
     pb_rtx=3;
-    { IP protocol numbers }
-    ipr_zero=0;
     { location of the protocol field in IPv4 header }
     ipr_off=9;
-    { header lengths }
-    ip_hlen=20;
-    icmp_hlen=8;
-    udp_hlen=8;
-    tcp_hlen=20;
     { other internal constants }
     eph_min=49152; { lowest ephemeral port, IANA }
     eph_maxr=65535 - eph_min; { random count for ephemeral port }
