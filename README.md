@@ -8,9 +8,10 @@
 - Configuration file support on PB-2000: done
 - UDP sockets: done
 - DNS resolver (IN A only): done
-- Compiled binary/library so far: 10.4 kB. Still too much and no TCP yet, but more to be rewritten in asm
+- Compiled library so far: 10.5 kB. Still too much and no TCP yet, but more to be rewritten in asm
 
-**Current pbnet.exe mode: ICMP echo reply test (run with 'icmp' parameter) or DNS resolver test (run with 'ns <host>' parameter)**
+**Current state: library build + net.exe tool: ICMP echo reply test (run with 'icmp' parameter) or DNS resolver test (run with 'ns <host>' parameter)**
+**CAL -> `run net [icmp | ns <host> | ping <host> [count] [size] ]`**
 
 #### Work notes
 
@@ -159,9 +160,12 @@ PBNET supports (will support) ICMP, UDP and TCP, and has a very basic DNS resolv
 
 ### Building and installing PBNET
 
-Download the source on a Linux host, type "make". This will build the host daemon, host/pbnet, compile the assembly files and include into pb2000/pbnet.src.pas to make pb2000/pbnet.pas.
+1. Download the source on a Linux host, type `make`. This will build the host daemon, host/pbnet, compile the assembly files, include inline code and build all sources into `./pb2000/build`.
+2. Copy files from `./pb2000/build` onto the PB-2000 however you like. There is a script included `pb2000/sendfile.sh` which cleans up Pascal sources and sends files to a serial device with optional speed limit in Bps (bytes per second), which translates to a per-byte delay. With an MD-100 or FA-7, you shouldn't need a speed limit or delay, but if you get  `Read Fault` while loading the file using MENU -> load -> rs232c, slow it down.
+3. Go into CAL mode, type `do build.bat`. This will build the `PBNET.DLE` library, `PBNET.UNI` unit file and the `net.exe` tool. ***Warning:** `build.bat` cleans up the sources after the build, including removing itself.*
+4. To compile anything against PBNET, both `PBNET.UNI` and `PBNET.DLE` are required, but once compiled, `PBNET.UNI` can be deleted.
 
-**A proper installation procedure to follow once this is made into a unit, etc.**
+***Note on filename case:** Like most humans, I prefer lower case. Although the `do` and `run` commands are not case sensitive, compiling and linking requires the unit files and library files to be ALL CAPS. This is why the libraries are all uppercase, but extra tools like `net.exe` are lowercase.*
 
 ### Configuring PBNET
 

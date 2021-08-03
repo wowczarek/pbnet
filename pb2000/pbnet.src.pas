@@ -1,9 +1,8 @@
 { Copyright (c) 2021, Wojciech Owczarek }
 { All rights reserved }
-{ BSD 2-clause licence-see LICENSE in the top directory }
-
+{ BSD 2-clause licence - see LICENSE in the top directory }
 {$D-}
-program pbnet;
+unit pbnet;
 uses crt; { only for timerxxx functions }
 const 
     { global settings }
@@ -15,9 +14,6 @@ const
     pb_mc=pb_mcn-1; { mcn minus 1 (so we can use > not >=) }
     min_blsize=16; { minimum block size }
     def_blsize=224; { block size }
-    { error constants }
-    e_ok=0; e_tmo=-1; e_intr=-2; e_trunc=-3;
-    e_crc=-4; e_mtu=-5; e_unxp=-6; e_err=-7; e_init=-8;
     { control characters }
     pb_sep=0;
     pb_ack=1;
@@ -25,9 +21,6 @@ const
     pb_rtx=3;
     { IP protocol numbers }
     ipr_zero=0;
-    ipr_icmp=1;
-    ipr_udp =17;
-    ipr_tcp =6;
     { location of the protocol field in IPv4 header }
     ipr_off=9;
     { header lengths }
@@ -35,94 +28,13 @@ const
     icmp_hlen=8;
     udp_hlen=8;
     tcp_hlen=20;
-    { ICMP types }
-    icmp_mecho=8;
-    icmp_mechoreply=0;
-    { DNS return codes (RCODE) }
-    de_formerr=1;de_servfail=2;de_nxdomain=3;de_notimp=4;de_refused=5;de_notzone=9;
-    { TCP flags }
-    tc_fin=1;tc_syn=2;tc_rst=4;tc_psh=8;tc_ack=16;
-    { other socket constants }
-    port_any=0;
+    { other internal constants }
     eph_min=49152; { lowest ephemeral port, IANA }
     eph_maxr=65535 - eph_min; { random count for ephemeral port }
-    { other internal constants }
     def_ttl=64;
     rs232_baddr=$08e2;
     timer_no=2;
     kv_maxlen=127; { max key/value string length }
-type
-    quad=array [0..3] of byte;
-    { an IP address - better this than a longint, really }
-    ipaddr=quad;
-    {tcp state}
-    tcp_state=(none,listen,synsent,synrecv,estab,finwait1,finwait2,closewait,closing,lastack,timewait,closed);
-    { a socket descriptor }
-    socket=record
-        state:tcp_state; { state (for TCP) }
-        lport:word; { local port:source port for PB->world, destination port for world->PB }
-        rport:word; { remore port}
-        remote:ipaddr; { remote address }
-    end;
-    { IPv4 header }
-    ip_hdr=record
-        ver_ihl:byte;
-        dscp_ecn:byte;
-        len:word;
-        id:word;
-        fl_foff:word;
-        ttl:byte;
-        proto:byte;
-        csum:word;
-        src:ipaddr;
-        dst:ipaddr;
-    end;
-    { ICMP header + payload }
-    icmp_hdr=record
-        mtype:byte;
-        mcode:byte;
-        csum:word;
-        id:word;
-        seq:word;
-        payload:array [0..1471] of byte;
-    end;
-    { UDP header + payload }
-    udp_hdr=record
-        sport:word;
-        dport:word;
-        len:word;
-        csum:word;
-        payload:array [0..1471] of byte;
-    end;
-    { TCP header + payload }
-    tcp_hdr=record
-        sport:word;
-        dport:word;
-        seqno: quad;
-        ackno: quad;
-        doff:byte; { 5 without options, 6 with MSS }
-        flags:byte;
-        wsize:word;
-        csum:word;
-        uptr:word;
-        payload:array[0..1459] of byte;
-    end;
-    { all-in-one packet format using record variants - Pascal's riot police }
-    { what riot police you say? response to unions! }
-    ippkt=record
-        len:word; { total length of packet }
-        l4_len:word; { length of layer 4 payload:icmp, udp, tcp, etc. }
-        case :boolean of
-            false:{ variant 1:raw packet buffer } (data:array [0..1499] of byte);
-            true: { variant 2:IPv4 header } (
-                ip:ip_hdr;
-                case :byte of
-                    0:{ variant 1:Raw IPv4 payload } (payload:array [0..1479] of byte);
-                    1:{ variant 2:ICMP + payload   } (icmp:   icmp_hdr);
-                    2:{ variant 3:UDP + payload    } (udp:    udp_hdr);
-                    3:{ variant 4:TCP + payload    } (tcp:    tcp_hdr)
-            )
-    end;
 var 
     f:file; { serial port file descriptor }
     _init:boolean=false; { pbnet initialised }
@@ -140,15 +52,12 @@ var
     _ttl:byte=def_ttl;
     my_ip:ipaddr=(10,99,99,2); { my own ip address }
     dns_ip:ipaddr=(9,9,9,9); { Quad9 - sod Google }
-    addr_any:ipaddr=(0,0,0,0); { INADDR_ANY }
     search_domain:string='';
     blsize:byte=def_blsize;
     checksums:boolean=true;
     bsize:byte;
     { counters }
     ip_id:word=0;
-    rxcnt:word=0;
-    txcnt:word=0;
 
 { ======= Utility and config file related routines }
 
@@ -157,6 +66,7 @@ function strerr(e:shortint): string;
 var se:string[8];
 begin
     case e of
+        e_arg:      se:='E_ARG';
         e_init:     se:='E_INIT';
         e_err:      se:='E_ERR';
         e_unxp:     se:='E_UNXP';
@@ -229,21 +139,21 @@ begin
 end;
 
 { parse an IP address from string into ipaddr - no range checks! returns 0 if all 4 octets parsed }
-function parse_ip(var v:string;var tgt:ipaddr):byte;
+function ipaddr_parse(var s:string;var a:ipaddr):byte;
 var n,p,l:byte;
     p1:byte=1;
     os:string;
     i,j:byte;
 begin
-    parse_ip:=1;
-    if not (length(v) in [7..15]) then exit; { shortest valid is 'n.n.n.n'=3+4*1=7, longest is 3+4*3=15 }
+    ipaddr_parse:=1;
+    if not (length(s) in [7..15]) then exit; { shortest valid is 'n.n.n.n'=3+4*1=7, longest is 3+4*3=15 }
     i:=0;j:=0;
-    while next_tok(v,'.',p1,p,l) and (l>0) and (i<4) do begin
-        os:=copy(v,p,l);
-        val(os,tgt[j],n); if n=0 then inc(j) else exit;
+    while next_tok(s,'.',p1,p,l) and (l>0) and (i<4) do begin
+        os:=copy(s,p,l);
+        val(os,a[j],n); if n=0 then inc(j) else exit;
         inc(i);
     end;
-    if j=4 then parse_ip:=0;
+    if j=4 then ipaddr_parse:=0;
 end;
 
 { process a key,value config entry }
@@ -253,7 +163,7 @@ label er;
 begin
   parsekv:=true;
   if k='ip' then begin
-    if parse_ip(v,tip)>0 then begin
+    if ipaddr_parse(v,tip)>0 then begin
          emsg:='could not parse';
          goto er;
     end;
@@ -261,7 +171,7 @@ begin
     exit;
   end;
   if k='dns' then begin
-    if parse_ip(v,tip)>0 then begin
+    if ipaddr_parse(v,tip)>0 then begin
         emsg:='could not parse';
         goto er;
     end;
@@ -368,9 +278,17 @@ end;
 
 { ========== other routines follow ======== }
 
-procedure print_ipaddr(var a:ipaddr);
+function ipaddr_str(var a:ipaddr):string;
+var ips_r:string[15]='';
+ips_o:string[3];
+i:byte;
 begin
-    write(a[0],'.',a[1],'.',a[2],'.',a[3]);
+    for i:=0 to 3 do begin
+        str(a[i],ips_o);
+        ips_r:=ips_r+ips_o;
+        if i < 3 then ips_r:=ips_r+'.';
+    end;
+    ipaddr_str:=ips_r;
 end;
 
 { RFC1071 checksum, as used in IP header checksum, ICMP header checksum, UDP checksum, etc. }
@@ -389,7 +307,7 @@ begin
 {$I dec_bl.pas}
 end;
 { compare two quads of bytes }
-function quad_eq(var ada:array of byte;var adb:array of byte): boolean;
+function quad_eq(var qa:array of byte;var qb:array of byte): boolean;
 begin
 {$I quad_eq.pas}
 end;
@@ -408,7 +326,7 @@ end;
 
 
 { send an IP packet down the pipe }
-function pkt_send(var pkt:ippkt;tout:word):shortint;
+function pkt_send(var pkt:ippkt;timeout:word):shortint;
 var
 left:word;
 plen:word=0;
@@ -463,10 +381,10 @@ begin
     blockwrite(f,_wbuf,left);
     inc(txcnt);
     { wait for ACK }
-    if tout>0 then timerstart(timer_no,tout);
+    if timeout>0 then timerstart(timer_no,timeout);
     repeat
         if (rs232_cnt>0) and (rs232_buf[rs232_pos-1]=pb_ack) then goto eok;
-        if (tout>0) and timerout(timer_no) then goto etmo;
+        if (timeout>0) and timerout(timer_no) then goto etmo;
     until kbbuf_cnt<>0;
     pkt_send:=e_intr;
     exit;
@@ -562,7 +480,7 @@ begin
 end;
 
 { respond to ICMP echo }
-function echo_respond(var pkt:ippkt; t:word): shortint;
+function echo_respond(var pkt:ippkt; timeout:word): shortint;
 var
 tmpaddr:ipaddr;
 cs:word;
@@ -579,13 +497,13 @@ begin
             inc(cs,$0800);
             if cs < swap(icmp.csum) then inc(cs);
             icmp.csum:=swap(cs);
-            echo_respond:=pkt_send(pkt,t);
+            echo_respond:=pkt_send(pkt,timeout);
         end else echo_respond:=e_unxp;
     end;
 end;
 
 { respond to a packet:send given UDP payload back to where it came from (but reverse ports and source/dest) }
-function udp_respond(var pkt:ippkt;t:word):shortint;
+function udp_respond(var pkt:ippkt;timeout:word):shortint;
 var
 taddr:ipaddr;
 tmpport:word;
@@ -599,7 +517,7 @@ begin
         udp.dport:=udp.sport;
         udp.sport:=tmpport;
     end;
-    udp_respond:=pkt_send(pkt,t);
+    udp_respond:=pkt_send(pkt,timeout);
 end;
 
 { wait for data on UDP socket }
@@ -625,7 +543,7 @@ begin
 end;
 
 { send data (pkt.udp.payload of len pkt.l4_len) to socket }
-function udp_send(var pkt:ippkt;var sock:socket;t:word):shortint;
+function udp_send(var pkt:ippkt;var sock:socket;timeout:word):shortint;
 begin
     { 'prime' the packet with basic header fields }
     pkt_prime(pkt);
@@ -639,10 +557,10 @@ begin
         sock.lport:=eph_min+random(eph_maxr);
     end;
     pkt.udp.sport:=swap(sock.lport);
-    udp_send:=pkt_send(pkt,t);
+    udp_send:=pkt_send(pkt,timeout);
 end;
 
-function tcp_connect(var pkt:ippkt;var sock:socket;t:word):shortint;
+function tcp_connect(var pkt:ippkt;var sock:socket;timeout:word):shortint;
 
 begin
 end;
@@ -682,9 +600,9 @@ label dosect;
 begin
     retries:=retr;
     { we don't support reverse lookups - if we got an IP, just parse that. Easy peasy. }
-    if parse_ip(shost,rip)=0 then goto ezpz;
+    if ipaddr_parse(shost,rip)=0 then goto ezpz;
     { too short or malformed }
-    dns_resolve:=e_unxp;
+    dns_resolve:=e_arg;
     if not hname_cleanup(shost) then exit;
     dns_resolve:=e_err;
 retry:
@@ -835,64 +753,5 @@ begin
     _init:=true;
 end;
 
-procedure icmp_test;
-var pkt:ippkt;
-r:shortint;
-label en;
 begin
-    if not pbn_init then exit;
-    repeat
-        pkt_ready;
-        r:=pkt_get(pkt,30);
-        if r=e_intr then goto en;
-        if r=e_ok then r:=echo_respond(pkt,30);
-    until false;
-en:
-    pbn_shutdown;
-end;
-
-procedure dns_test;
-var
-pkt:ippkt;
-r:shortint;
-ps:string;
-ip:ipaddr;
-begin
-    ps:=paramstr(2);
-    ps:=trim(ps);
-    if ps='.' then begin
-        writeln('malformed hostname: ',ps);
-        exit;
-    end;
-    if not pbn_init then exit;
-    writeln('looking up ',ps,'...');
-    r:=dns_resolve(ps,ip,pkt,30,3);
-    if r=e_ok then begin
-        write(ps,' is: '); print_ipaddr(ip);
-        writeln;
-    end else writeln('dns_resolve error: ',strerr(r));
-    pbn_shutdown;
-end;
-
-label usage;
-begin
-    if (paramcount<1) then goto usage;
-
-    if paramstr(1)='icmp' then begin
-        writeln('ICMP echo request responder started');
-        icmp_test;
-        exit;
-    end else if paramstr(1)='ns' then begin
-        if paramcount<2 then begin
-            writeln('resolve: hostname required');
-            exit;
-        end;
-        dns_test;
-        exit;
-    end;
-
-usage:
-        writeln('usage: ',paramstr(0),' [icmp | ns <host> ]');
-        exit;
-
 end.

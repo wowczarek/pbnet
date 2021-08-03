@@ -65,5 +65,8 @@ pbnet
 hd61700
 pbnet.pas
 
+# build dir
+build
+
 # scrap
 .scrap

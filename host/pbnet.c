@@ -21,7 +21,7 @@
 
 #define PROGNAME "pbnet"
 
-#define MAX_BLOCKSIZE 256
+#define MAX_BLOCKSIZE 224
 #define MTU 1500
 
 /* state timeouts */
@@ -73,7 +73,7 @@ static struct pbnet_config _config = {
     .baudrate = 9600,
     .delay = 1000,
     .txqlen = 5,
-    .blocksize = 224,
+    .blocksize = MAX_BLOCKSIZE,
     .netmask = 24,
     .debuglevel = PB_DNONE,
     .ckoffload = false,
@@ -691,8 +691,8 @@ static int parse_config(int argc, char ** argv) {
                         break;
             case 'B':
                         n = atoi(optarg);
-                        if(n < 16 || n > 256) {
-                            dprintf(PB_DNONE,PROGNAME": block size out of range (16..256)\n");
+                        if(n < 16 || n > MAX_BLOCKSIZE) {
+                            dprintf(PB_DNONE,PROGNAME": block size out of range (16..%d)\n",MAX_BLOCKSIZE);
                             return -2;
                         }
                         _config.blocksize = n;
