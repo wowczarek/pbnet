@@ -30,7 +30,11 @@ PBNET is an attempt at creating something resembling a semi working IP stack for
 
 ### For the what?
 
-Casio PB-2000 (PB-2000C / AI-1000) is an 8-bit programmable pocket computer made and sold by Casio in the late 1980s, sporting a QWERTY + numeric keyboard, 192x32 dot matrix LCD and up to 64 kB RAM (32 kB + RP-33 RAM pack). The RAM is shared between system area, heap, stack and file storage, and is battery-backed. The PB-2000 has a calculator mode and a menu-driven file manager. The CPU is a custom Hitachi HD61700, same as used in another pocket Casio computer, the PB-1000. What makes the PB-2000C unique is that it supports a number of programming environments, unlike most similar devices of this era that out of the box only supported BASIC. The PB-2000 has a built-in ROM with a K&R C (yes, C!) interpreter - that's the PB-2000C - or one with LISP (really) - that's the AI-1000 that was only sold in Japan. But that's not where it ends - it also has a ROM card slot, and ROM cards were available with BASIC (OM-53B) and Prolog (OM-52P). C was also available as a ROM card for the AI model. The PB-2000 can interface with the rest of the world via the FA-7 interface (RS-232 serial, parallel port, tape audio in/out) or the MD-100, which is the latter, but replaces the tape interface with a 3.5" floppy disk drive. Unlike other 8-bits you might have heard of like Commodore, Atari , ZX-Spectrum and such like, it does not have a TV output and no fancy scan line juggling circuitry, nor does it have a sound chip - only a simple piezo buzzer out of which you can PWM some chirps. But it's pocketable and runs on batteries. It was meant for engineering and academic use.
+Casio PB-2000 (PB-2000C / AI-1000) is an 8-bit programmable pocket computer made and sold by Casio in the late 1980s, sporting a QWERTY + numeric keyboard, 192x32 dot matrix LCD and up to 64 kB RAM (32 kB + RP-33 RAM pack). The RAM is shared between system area, heap, stack and file storage, and is battery-backed. The PB-2000 has a calculator mode and a menu-driven file manager. The CPU is a custom Hitachi HD61700, same as used in another pocket Casio computer, the PB-1000.
+
+What makes the PB-2000C unique is that it supports a number of programming environments, unlike most similar devices of this era that out of the box only supported BASIC. The PB-2000 has a built-in ROM with a K&R C (yes, C!) interpreter - that's the PB-2000C - or one with LISP (really) - that's the AI-1000 that was only sold in Japan. But that's not where it ends - it also has a ROM card slot, and ROM cards were available with BASIC (OM-53B) and Prolog (OM-52P). C was also available as a ROM card for the AI model. The PB-2000 can interface with the rest of the world via the FA-7 interface (RS-232 serial, parallel port, tape audio in/out) or the MD-100, which is the latter, but replaces the tape interface with a 3.5" floppy disk drive.
+
+Unlike other 8-bits you might have heard of like Commodore, Atari , Spectrum and such like, it does not have a TV output and no fancy scan line juggling circuitry (it does have an LCD controller that supports sprites though), nor does it have a sound chip - only a simple piezo buzzer out of which you can PWM some chirps. But it's pocketable and runs on batteries. It was meant for engineering and academic use.
 
 In this document I will mostly be referring to the computer as PB-2000 or simply *PB*, which may mean either the PB-2000C or the AI-1000.
 
@@ -40,7 +44,10 @@ Shut your trap! It's a pocket 8-bit!1!!!1!
 
 ### PBNET was written in what?
 
-Why, DL-Pascal of course! None of the ROMs available for the PB-2000 were compilers, even the C one is an interpreter, so, fast is what they are not. There is only one exception, and at the same time the only third-party ROM ever made for the PB-2000, which is DL-Pascal that was developed in 1989-1990 by Hans Larsson of Data-Larsson, Sweden. DL-Pascal is a proper, fully featured Pascal compiler, mostly compatible with Turbo Pascal 5.5 and QuickPascal 1.0, which supports inline assembly, building units (libraries), preprocessor, etc. DL-Pascal takes the PB-2000 to where Casio were never able to. The 64 kB ROM contains the compiler, a full screen editor with search/replace/cut/copy/move/goto capabilities, a menu-driven file manager, a debugger, a calculator / CLI mode with batch file support (basic "shell scripting") and more. Compiled binaries are small and code runs fast, and Pascal provides many features that other supported ROMs never did. DL-Pascal also came with a 300+ page grimoire of a manual.
+Why, DL-Pascal of course! None of the ROMs available for the PB-2000 were compilers, even the C one is an interpreter, so, fast is what they are not. There is only one exception, and at the same time the only third-party ROM ever made for the PB-2000, which is DL-Pascal that was developed in 1989-1990 by Hans Larsson of Data-Larsson, Sweden (http://www.datalarsson.se/)
+DL-Pascal is a proper, fully featured Pascal compiler, mostly compatible with Turbo Pascal 5.5 (no Object Pascal though) and QuickPascal 1.0, which supports inline assembly, has the familiar CRT unit, supports building new units (libraries), preprocessor, etc. DL-Pascal takes the PB-2000 to where Casio were never able to. The 64 kB ROM contains the compiler, a full screen editor with search/replace/cut/copy/move/goto capabilities, a menu-driven file manager, a debugger, a calculator / CLI mode with batch file support (basic "shell scripting") and more. Compiled binaries are small and code runs fast (see note below), and Pascal provides many features that other supported ROMs never did. DL-Pascal also came with a 300+ page grimoire of a manual.
+
+*Note on "fast" and "small binaries"*: DL-Pascal definitely produces fastest code out of any development environment supported on the PB platform just by virtue of being a compiler, however with the compiler being so tiny, sacrifices had to be made. There is little room for compiler optimisation, so compared to raw assembly, it is almost a waste of resources, however the convenience beats everything else available for the PB-2000C / AI-1000.
 
 ### Can I try it?
 
@@ -108,7 +115,9 @@ A `DEAD` state exists for any failures while transmitting and receiving, but its
 
 - **PBNET will only support the absolute working minimum.** It does not aim for RFC compliance and working with every guideline that an IP stack should conform to. While I would be glad to implement all this, storage is limited and I have to cheat. On the PB-2000, PBNET will mostly silently drop packets when they are too big, fragmented, or otherwise not expected. This is actually not unusual today with firewalls everywhere, still it could be better.
 
-- **PBNET will do as much as possible in the PB-2000.** We could move most of processing and connection handling to the host side and have it serve as a proxy, e.g. the PB would send a request like "create UDP socket to a.b.c.d port n", and the host would then do that and send back an ID, and then if data arrived, it would only send the payload, prepended with the ID and length. TCP could be completely outsourced to the host as well - but that is not what we want.
+- **PBNET does not support IP fragments.** It could, of course, but RAM is severely limited. PBNET ignores fragments and always sets the DF bit in outgoing packets.
+
+- **PBNET will do as much as possible in the PB-2000.** We could move most of processing and connection handling to the host side and have it serve as a proxy, e.g. the PB would send a request like "create UDP socket to a.b.c.d port n", and the host would then do that and send back an ID, and then if data arrived, it would only send the payload, prepended with the ID and length. TCP could be completely outsourced to the host as well - but that is not what we want. One thing that does make sense to do is to proxy SSL connections via the host, as a native SSL implementation would be a serious overkill.
 
 - **PBNET is slow to respond.** That depends what we mean by "slow", howeve on the PB-2000 side, everything is written in DL-Pascal + assembly. While this is the best performance you can get on this platform with a high-level language, latency is significant. Every system call can add tens of milliseconds. Also the sheer slowness of the interface (9600 bps max) contributes to this. Overall, looking at test results, it seems like I am achieving at least 75% of RX/TX data rates achievable with no processing at all. See **throughput**.
 
@@ -197,7 +206,180 @@ Just run `pbnet -h` to see the available options and defaults. Using command lin
 
 ### Working with PBNET
 
-*API description to follow*
+To build your own program with PBNET, you need the `PBNET.UNI` unit file and `PBNET.DLE` library file. Then it's only a matter of specifying `uses pbnet;` in your Pascal code. Although units come with a "main" initialiser function that is called when the library is loaded, PBNET omits that and `pbnet_init` has to be called explicitly and none of the API calls will work unless it is.
+
+On the host side, just run the `pbnet` binary with correct arguments.
+
+#### API description (work in progress) ####
+
+##### Structures (records) and data types #####
+
+*PBNET uses a combined `ippkt` record* which uses Pascal's variants (like C's unions) to hold all protocol headers and payload. The `case` statemens are just DL-Pascal's way to declare variants.
+
+*The packet record* looks as follows: 
+
+```pascal
+type
+    ippkt=record
+        len:word; { total length of packet }
+        l4_len:word; { length of layer 4 payload:icmp, udp, tcp, etc. }
+        case :boolean of
+            false:{ variant 1:raw packet buffer } (data:array [0..1499] of byte);
+            true: { variant 2:IPv4 header } (
+                ip:ip_hdr;
+                case :byte of
+                    0:{ variant 1:Raw IPv4 payload } (payload:array [0..1479] of byte);
+                    1:{ variant 2:ICMP + payload   } (icmp:   icmp_hdr);
+                    2:{ variant 3:UDP + payload    } (udp:    udp_hdr);
+                    3:{ variant 4:TCP + payload    } (tcp:    tcp_hdr)
+            )
+    end;
+```
+
+This record is of a fixed size of 1500 bytes *total* (plus `len` and `l4_len` fields). Normally, only one `ippkt` variable is required for all operations. The `l4_len` field contains the payload length for the given protocol (ICMP, UDP, TCP) and is set automatically on packet receipt, and on transmission, this field is used to indicate the payload size we want to send with the given protocol.
+
+*Protocol headers* are defined as follows:
+
+```pascal
+const
+    { IP protocol numbers }
+    ipr_zero=0; ipr_icmp=1; ipr_udp =17; ipr_tcp =6;
+    { header lengths }
+    ip_hlen=20; icmp_hlen=8; udp_hlen=8; tcp_hlen=20;
+type
+    quad=array [0..3] of byte;
+    ipaddr=quad;
+    { IPv4 header }
+    ip_hdr=record
+        ver_ihl:byte;
+        dscp_ecn:byte;
+        len:word;
+        id:word;
+        fl_foff:word;
+        ttl:byte;
+        proto:byte;
+        csum:word;
+        src:ipaddr;
+        dst:ipaddr;
+    end;
+    { ICMP header + payload }
+    icmp_hdr=record
+        mtype:byte;
+        mcode:byte;
+        csum:word;
+        id:word; { belongs to ICMP echo, just here for convenience }
+        seq:word; { belongs to ICMP echo }
+        payload:array [0..1471] of byte;
+    end;
+    { UDP header + payload }
+    udp_hdr=record
+        sport:word;
+        dport:word;
+        len:word;
+        csum:word;
+        payload:array [0..1471] of byte;
+    end;
+    { TCP header + payload }
+    tcp_hdr=record
+        sport:word;
+        dport:word;
+        seqno: quad;
+        ackno: quad;
+        doff:byte; { 5 without options, 6 with MSS }
+        flags:byte;
+        wsize:word;
+        csum:word;
+        uptr:word;
+        payload:array[0..1459] of byte;
+    end;
+
+```
+
+The *payload* (variable `pkt` for illustration) can be accessed as:
+
+- `pkt.data`: raw packet (IP payload + IPv4 header)
+- `pkt.ip.payload`: IPv4 payload
+- `pkt.udp.payload`: UDP payload
+- `pkt.icmp.payload`: ICMP payload
+- `pkt.tcp.payload`: TCP payload
+
+The *socket* is defined as follows:
+
+```pascal
+    {tcp state}
+    tcp_state=(none,listen,synsent,synrecv,estab,finwait1,finwait2,closewait,closing,lastack,timewait,closed);
+    { a socket descriptor }
+    socket=record
+        state:tcp_state; { state (for TCP) }
+        lport:word; { local port:source port for PB->world, destination port for world->PB }
+        rport:word; { remore port}
+        remote:ipaddr; { remote address }
+    end;
+```
+
+Instead of *source* and *destination* (port, address) we look at *remote* and *local*.
+
+Extra constants / special variables are:
+
+```pascal
+const
+    port_any=0;
+var
+    addr_any:ipaddr=(0,0,0,0);
+```
+
+These are used to accept any remote source and any remote port. For example with UDP, if we set `sock.rport:=port_any` and `sock.remote:=addr_any` and pass this socket to `udp_recv`, it will accept the first UDP packet destined to our IP address and our `sock.lport`, and set `rport` and `remote` to the remote source port and IPv4 address, so from this point, further `udp_recv` calls will filter this and only this connection.
+
+##### Procedures and functions #####
+
+| Function / procedure | 
+|----------------------|
+| `procedure pbn_shutdown;` |
+| `function  pbn_init:boolean;` |
+| `procedure pkt_hold;` |
+| `procedure pkt_ready;` |
+| `function  pkt_send(var pkt:ippkt;timeout:word):shortint;` |
+| `function  pkt_get(var pkt:ippkt;timeout:word):shortint;` |
+| `function  echo_respond(var pkt:ippkt; timeout:word):shortint;` |
+| `function  udp_recv(var pkt:ippkt;var sock:socket;timeout:word):shortint;` |
+| `function  udp_send(var pkt:ippkt;var sock:socket;timeout:word):shortint;` |
+| `function  tcp_connect(var pkt:ippkt;var sock:socket;timeout:word):shortint;` |
+| `function  dns_resolve(shost:string;var rip:ipaddr;var pkt:ippkt;timeout: word; retr: byte):shortint;` |
+| `function  strerr(e:shortint): string;` |
+| `function  ipaddr_parse(var s:string;var a:ipaddr):byte;` |
+| `function  ipaddr_str(var a:ipaddr):string;` |
+| `function  quad_eq(var qa:array of byte;var qb:array of byte): boolean;` |
+
+##### Error codes #####
+
+Most PBNET calls return an error code. `E_OK = 0` is returned on success, negative values `E_XXX` are returned on failure and positive values are reserved for protocol-specific errors, such as DNS RCODE response codes.
+
+| Code      | Value | Meaning |
+|-----------|-------|---------|
+| `E_OK`    | 0     | Success |
+| `E_TMO`   | -1    | Timeout (timeouts are specified in tenths of seconds) |
+| `E_INTR`  | -2    | Call interrupted (any key pressed - *TODO:* only interrupt on BRK key) |
+| `E_TRUNC` | -3    | Packet truncated: there is a mismatch between the IP length field and actual length of packet received |
+| `E_CRC`   | -4    | Incorrect cheksum (either IP header or ICMP/UDP/TCP checksum) |
+| `E_MTU`   | -5    | Packet too big |
+| `E_UNXP`  | -6    | Unexpected packet received - we get this if we want to receive packets from a specific host and/or port, but received something else |
+| `E_ERR`   | -7    | Any other error |
+| `E_INIT`  | -8    | PBNET uninitialised |
+| `E_ARG`   | -9    | Argument error |
+
+`dns_resolve` errors on top of the errors above, follow DNS RCODE. The following ones are defined - others are still returned if they happen:
+
+```pascal
+const
+    { DNS return codes (RCODE) }
+    de_formerr=1;de_servfail=2;de_nxdomain=3;de_notimp=4;de_refused=5;de_notzone=9;
+```
+
+The function `function strerr(e:shortint):string` can be used to convert error codes to strings.
+
+#### Typical program flow ###
+
+[TODO]
 
 ## FAQ
 
