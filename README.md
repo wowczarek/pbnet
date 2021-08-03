@@ -1,4 +1,44 @@
-### NOTE: Status of this project *is work in progress* and it is not yet fully usable
+### NOTE: Status of this project *is work in progress* and it is not yet fully usable ###
+
+Table of contents
+-----------------
+
+- [PROGRESS](#progress)
+    + [Work notes](#work-notes)
+- [What is PBNET?](#what-is-pbnet-)
+  * [Well, what is it?](#well--what-is-it-)
+  * [For the what?](#for-the-what-)
+  * [So it's a programmable calculator?](#so-it-s-a-programmable-calculator-)
+  * [PBNET was written in what?](#pbnet-was-written-in-what-)
+  * [Can I try it?](#can-i-try-it-)
+  * [How did you even find this thing?](#how-did-you-even-find-this-thing-)
+- [What does PBNET do?](#what-does-pbnet-do-)
+- [How does it work?](#how-does-it-work-)
+  * [Framing over serial (IPBSP)](#framing-over-serial--ipbsp-)
+  * [State machine on the PB-2000 side](#state-machine-on-the-pb-2000-side)
+  * [State machine on the host side](#state-machine-on-the-host-side)
+- [Project goals and limitations](#project-goals-and-limitations)
+- [Throughput](#throughput)
+- [Protocol support and features](#protocol-support-and-features)
+- [Future plans / items under consideration](#future-plans---items-under-consideration)
+- [Using PBNET](#using-pbnet)
+  * [Requirements](#requirements)
+    + [Host](#host)
+    + [PB-2000C / AI-1000](#pb-2000c---ai-1000)
+  * [Building and installing PBNET](#building-and-installing-pbnet)
+  * [Configuring PBNET](#configuring-pbnet)
+    + [PB-2000C / AI-1000 side](#pb-2000c---ai-1000-side)
+    + [Host side](#host-side)
+  * [Working with PBNET](#working-with-pbnet)
+    + [API description (work in progress)](#api-description--work-in-progress-)
+      - [Structures (records) and data types](#structures--records--and-data-types)
+      - [Procedures and functions](#procedures-and-functions)
+      - [Error codes](#error-codes)
+    + [Typical program flow](#typical-program-flow)
+- [FAQ](#faq)
+- [Acknowledgments](#acknowledgments)
+
+
 
 ## PROGRESS
 
