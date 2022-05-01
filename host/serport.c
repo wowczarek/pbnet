@@ -156,7 +156,7 @@ static int sp_setparams(int fd, const sp_params *params, const unsigned int flus
 
    /* the rest */
    attrs.c_cflag |=  CREAD | CLOCAL; /* enable receiver, ignore modem control lines */
-   attrs.c_iflag &= ~IGNBRK;         /* ignore break sequence */
+   attrs.c_iflag &= ~( IGNBRK | ICRNL | INPCK | ISTRIP ); /* ignore break sequence, no cr/nl swap, no parity check, no 7-bit stripping */
    attrs.c_oflag &= ~OPOST;          /* disable post-processing */
    attrs.c_lflag  =  SP_NONE;        /* disable all local flags: canonical mode, echos, signals */
 
