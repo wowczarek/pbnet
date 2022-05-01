@@ -20,7 +20,7 @@ here:
 
     ldim $8, (IX+$31), 4    ; $8...$11 = sub1...sub4; wbuf+=4
     xrc $8,$9               ; if sub1=sub2
-    jr nz,copyloop          ; else continue
+    jr nz,nocopy            ; else continue
     ; block copy, no replacements
     ldw $10, $2             ; $10 = wbuf
     byu $7                  ; $7 = 0
@@ -29,31 +29,34 @@ here:
     bup                     ; copy the block
     jr done	                ; the end
 
+nocopy:
     sb $6,4                 ; len -= 4;
 
 ; surely there has to be a faster way to do this...
 
-copyloop:
-    ldi $12, (IX+$31)       ; c = buf++
+; note we operate on $0 and use it as 2nd argument for xor,
+; so it gets optimised to SZ
+decloop:
+    ldi $0, (IX+$31)        ; c = buf++
 sub1:
-    xrc $12, $8             ; if c = sub1
+    xrc $8, $0              ; if c = sub1
     jr nz, sub2
-    ld $12, $31, jr bytedone  ; then c = 0
+    ld $0, $31, jr bytedone ; then c = 0
 sub2:
-    xrc $12, $9             ; if c = sub2
+    xrc $9, $0              ; if c = sub2
     jr nz, sub3
-    ld $12, $30, jr bytedone  ; then c = 1
+    ld $0, $30, jr bytedone ; then c = 1
 sub3:
-    xrc $12, $10            ; if c = sub3
+    xrc $10, $0             ; if c = sub3
     jr nz, sub4
-    ld $12, 2, jr bytedone  ; then c = 2
+    ld $0, 2, jr bytedone   ; then c = 2
 sub4:
-    xrc $12, $11            ; if c = sub4
+    xrc $11, $0             ; if c = sub4
     jr nz, bytedone
-    ld $12, 3               ; then c = 3
+    ld $0, 3                ; then c = 3
 bytedone:
-    sti $12, (IZ+$31)       ; *pkt++ = c
+    sti $0, (IZ+$31)        ; *pkt++ = c
     sb $6,$30               ; len--
-    jr nz, copyloop         ; if len > 0 then repeat
+    jr nz, decloop          ; if len > 0 then repeat
 done:
     pre IX, $18             ; restore IX

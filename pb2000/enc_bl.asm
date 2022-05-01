@@ -22,10 +22,7 @@ here:
     pre IX, $2              ; put check map address into IX, cmap
 
     ; clear the check map
-    xrw $14,$14             ; $14..$21 = 0
-    xrw $16,$16
-    xrw $18,$18
-    xrw $20,$20
+    xrm $14,$14,8           ; $14..$21 = 0
     stim $14, (IX+$31), 8   ; zero 8 bytes, IX+=8, times 4
     stim $14, (IX+$31), 8
     stim $14, (IX+$31), 8
@@ -83,9 +80,7 @@ miccheck:
     jr done	                ; the end
 ; special case 2: if last 4 bytes are unused, they can be uses as substitutes straight away
 maccheck:
-    ldw $16, 31             ; $16..$17 = 31
-    adw $16, $2             ; $16 = cmap + 31
-    ld $15, ($16)           ; $15 = cmap[31];
+    ld $15, (IX+31)         ; $15 = cmap[31];
     anc $15, &h0f           ; check if 4 lower bits in cmap[31] are 0
     jr nz, findsub          ; nope: find substitutes as usual
     ; yes: just use fc,fd,fe,ff as substitutes
