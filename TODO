@@ -1,12 +1,12 @@
 General:
 
 - reconsider config file and strerr to save space!
-- x Add explicit WBLOCK state (ends on rx SEP)
-- x Implement timeouts (WBLOCK, WACK, WRTX) on host side
+x Add explicit WBLOCK state (ends on rx SEP)
+x Implement timeouts (WBLOCK, WACK, WRTX) on host side
 - Implement error handling on host side
 - Implement timeouts and error handling on PB-2000 side (block timeout at least)
-- x Implement debug flags / log levels
-- x Make IP address configurable on either end
+x Implement debug flags / log levels
+x Make IP address configurable on either end
 
 PB-2000C IP stack:
 - add timeout to pkt_send, host should somehow confirm packet receipt
@@ -16,7 +16,7 @@ PB-2000C IP stack:
 - restart / keep restarting if usb unavailable
 - BRK, not any key, to stop
 x add timeout parameter to pkt_get
-- handle RX checksum checking, broken pakets
+- handle RX checksum checking, broken packets
 - handle unreachables, TTL, etc.
 x discard when dst != me
 
@@ -38,7 +38,7 @@ x implement DNS
 
 - implement TCP
 
-- create unit / library
+x create unit / library
 
 - write ping client / program
 
