@@ -48,7 +48,8 @@ Table of contents
 - Configuration file support on PB-2000: done
 - UDP sockets: done
 - DNS resolver (IN A only): done
-- Compiled library so far: 10.5 kB. Still too much and no TCP yet, but more to be rewritten in asm
+- Compiled library so far: 10.5 kB. Still too much and no TCP yet, but more to be rewritten in asm. After removing config file processing, we gain 2k binary size!
+- Added emulated serial port via TCP to Piotr Piatek's PB-2000C emulator
 
 **Current state: library build + net.exe tool: ICMP echo reply test (run with 'icmp' parameter) or DNS resolver test (run with 'ns <host>' parameter)**
 **CAL -> `run net [ icmp | ns <host> ]`**
@@ -58,7 +59,7 @@ Table of contents
 DL-Pascal is great, but the machine code it produces is bloated, plus it's Pascal. Only way to reduce binary size is to write more in assembly:
 
 - What in C would be shift operators, in DL-Pascal are functions, meaning that there is loading of parameters and several jumps, and then finally a loop(!), because HD61700 does not support arbitrary bit shifts - only 4-bit shifts (`diX`) and 1-bit shifts (`biX`)
-- Mathematical expressions produce lots of machine code. For example: `a := a + 5` produces 7 bytes more than `inc(a,5)`, and even at that, `inc()` is a function (as per Pascal).
+- Mathematical expressions produce lots of machine code. For example: `a := a + 5` produces 7 bytes more than `inc(a,5)`, and even at that, `inc()` is a procedure (as per Pascal).
 - Function call overhead is noticeable, and so is the machine code increase from declaring functions (~30 bytes). Anything that is single-use, should be inlined. An example is the checksum function which itself is about 50 bytes of machine code, including loading of arguments, where declaring it and calling it uses more machine code than it probably would if it was fully inlined
 - A DL-Pascal cross-compiler would be the best way to go if we wanted to optimise things - or at least initially a macro processor that would speed up certain operations and produce less machine code. Shifts, swaps, increments and such should be asm macros
 
