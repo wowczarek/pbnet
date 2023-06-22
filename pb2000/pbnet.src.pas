@@ -219,8 +219,6 @@ er:
   parsekv:=false;
   writeln(cfg_file,': ',k,'=',v,': ',emsg);
 end;
-{ suppress I/O errors temporarily, so that the file not existing doesn't halt us }
-{$I-}
 { load config file and parse settings, returns false on failure }
 { note: 'failure' is only a parse failure, the file does not need to exist }
 function readconfig:boolean;
@@ -236,8 +234,12 @@ label en;
 begin
   readconfig:=true;
   assign(f,cfg_file);
-  if ioresult<>0 then goto en;
+{ suppress I/O errors temporarily, so that the file not existing doesn't halt us }
+{$I-}
   reset(f);
+{ restore halt on I/O errors}
+{$I+}
+  if ioresult<>0 then goto en;
   { read file line by line }
   while not eof(f) do begin
     readln(f,s);
@@ -247,6 +249,7 @@ begin
         inc(i);
     until alnum(s[i]) or (i=length(s));
     s:=trim(s);
+    if s='' then goto cont; {skip empty lines}
     if length(s)<3 then goto er;
     { split into k,v on '=' }
     p:=pos('=',s);
@@ -266,8 +269,6 @@ er:
   readconfig:=false;
   close(f);
 end;
-{ restore halt on I/O errors}
-{$I+}
 
 { ========== other routines follow ======== }
 
