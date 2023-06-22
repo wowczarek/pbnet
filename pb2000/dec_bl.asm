@@ -33,9 +33,12 @@ nocopy:
     sb $6,4                 ; len -= 4;
 
 ; surely there has to be a faster way to do this...
+; answer: if not faster then smaller if we push the substitutions
+;  onto user stack and pop them in a 0..3 loop for xrc.
+;  anyhow, this is 'plenty fast' already. that'll do, pig, that'll do.
 
 ; note we operate on $0 and use it as 2nd argument for xor,
-; so it gets optimised to SZ
+; so it gets optimised to $SZ
 decloop:
     ldi $0, (IX+$31)        ; c = buf++
 sub1:
