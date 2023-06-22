@@ -1,8 +1,8 @@
 CC=gcc
 CFLAGS+=-std=gnu99 -Wall -I. -O3 -lrt
 
-DEPS = serport.h tunif.h
-OBJ1 = serport.o tunif.o pbnet.o
+DEPS = serport.h tcp.h tunif.h
+OBJ1 = serport.o tcp.o tunif.o pbnet.o
 
 %.o: %.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)
