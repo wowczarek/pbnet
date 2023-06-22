@@ -205,16 +205,10 @@ int sp_open(const char* devpath, const sp_params *params, const unsigned int fla
 
 }
 
-/* get number of bytes available for reading */
-int sp_nread(int fd) {
+ssize_t sp_read(int fd, void* buf, size_t len) {
+    return read(fd, buf, len);
+}
 
-    int nr = 0;
-    int res;
-
-    res = ioctl(fd, FIONREAD, &nr);
-
-    if(res == -1) return res;
-
-    return nr;
-
+ssize_t sp_write(int fd, void* buf, size_t len) {
+    return write(fd, buf, len);
 }

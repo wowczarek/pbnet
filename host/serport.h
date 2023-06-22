@@ -37,6 +37,7 @@ typedef struct {
 } sp_params;
 
 int sp_open(const char* devpath, const sp_params *params, const unsigned int flags);
-int sp_nread(int fd);
+ssize_t sp_read(int fd, void* buf, size_t len);
+ssize_t sp_write(int fd, void* buf, size_t len);
 
 #endif /* __SERPORT_H_ */
