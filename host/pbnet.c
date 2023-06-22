@@ -17,12 +17,14 @@
 #include <errno.h>
 
 #include "serport.h"
+#include "tcp.h"
 #include "tunif.h"
 
 #define PROGNAME "pbnet"
 
 #define MAX_BLOCKSIZE 224
 #define MTU 1500
+#define PORT_MAX 65535
 
 /* state timeouts */
 #define IDLE_TIMEOUT  2 /* ACK interval during INIT state */
@@ -53,16 +55,18 @@ enum {
 
 /* configuration holder */
 struct pbnet_config {
-    int baudrate;       /* serial port baud rate */
-    int delay;          /* TX per byte delay */
-    int txqlen;         /* TX queue length for the TUN interface */
-    size_t blocksize;   /* block size in bytes */
-    char* sdev;         /* serial device path */
-    char* ipstr;        /* TUN (host side) IP address string */
-    int debuglevel;     /* debug level (1..5, 0 = none) */
-    uint8_t netmask;    /* TUN net mask */
-    bool ckoffload;     /* checksum offload yes/no */
-    bool unreachables;  /* send IP unreachables when PB is down or unreachable */
+    int baudrate;        /* serial port baud rate */
+    int delay;           /* TX per byte delay */
+    int txqlen;          /* TX queue length for the TUN interface */
+    size_t blocksize;    /* block size in bytes */
+    char* sdev;          /* serial device path */
+    char* ipstr;         /* TUN (host side) IP address string */
+    int debuglevel;      /* debug level (1..5, 0 = none) */
+    uint8_t netmask;     /* TUN net mask */
+    unsigned short port; /* TCP port number */
+    bool tcp;            /* using TCP insdead of serial */
+    bool ckoffload;      /* checksum offload yes/no */
+    bool unreachables;   /* send IP unreachables when PB is down or unreachable */
 };
 
 /* config defaults */
@@ -74,8 +78,10 @@ static struct pbnet_config _config = {
     .delay = 1000,
     .txqlen = 5,
     .blocksize = MAX_BLOCKSIZE,
-    .netmask = 24,
     .debuglevel = PB_DNONE,
+    .netmask = 24,
+    .port = 7777,
+    .tcp = false,
     .ckoffload = false,
     .unreachables = false
 };
@@ -125,9 +131,9 @@ struct iphdr {
 struct pbnet {
 
     /* file descriptors */
-    int sp_fd;
-    int tun_fd;
-    int timer_fd;
+    int sp_fd;                               /* Serial port or TCP socket */
+    int tun_fd;                              /* TUN device */
+    int timer_fd;                            /* timer fd */
 
     uint8_t sp_state;                        /* current state */
     int retries;                             /* number of (idle check) retries */
@@ -137,7 +143,7 @@ struct pbnet {
     size_t sp_rx_plen;                       /* running length of packet being assembled */
     size_t sp_rx_blen;                       /* length of currently received block */
     unsigned char sp_rx_pbuf[MTU];           /* incoming packet buffer */
-    unsigned char sp_rx_bbuf[MTU];          /* incoming block buffer  */
+    unsigned char sp_rx_bbuf[MTU];           /* incoming block buffer  */
 
     /* outgoing packet over serial */
     size_t sp_tx_plen, sp_tx_left, sp_tx_oh; /* length of outgoing packet, bytes left to send, total overhead */
@@ -157,6 +163,11 @@ struct pbnet {
     uint32_t sp_rx_count, sp_tx_count;
 
 };
+
+/* reader/writer abstraction to allow custom read / write code between serial and TCP */
+
+ssize_t (*sread)(int, void*, size_t);
+ssize_t (*swrite)(int, void*, size_t);
 
 #define BOOLSTR(v) ((v)? "true" : "false")
 
@@ -254,11 +265,11 @@ static void dec_block(const void *ibuf, void *obuf, const size_t blocklen) {
 static int sp_xmit(int fd, void* buf, size_t len) {
 
     if(len == 1 || _config.delay == 0) {
-        return write(fd, buf, len);
+        return swrite(fd, buf, len);
     } else {
 
         for(int i = 0; i < len; i++) {
-            int ret = write(fd,buf++, 1);
+            int ret = swrite(fd,buf++, 1);
             if(ret < 0) return ret;
             while (usleep(_config.delay) == EINTR) usleep(_config.delay);
         }
@@ -357,7 +368,7 @@ static void handle_timer(struct pbnet *pb) {
 
 
 /* set up serial port, wait for initial ACK, set up TUN interface */
-struct pbnet pbnet_init(const char* dev, const sp_params *params, const char* addr, const uint8_t mask) {
+struct pbnet pbnet_init(struct pbnet_config *config) {
 
     struct pbnet ret;
     char buf[1024];
@@ -365,27 +376,62 @@ struct pbnet pbnet_init(const char* dev, const sp_params *params, const char* ad
     memset(&ret, 0, sizeof(ret));
     ret.sp_tx_pos = ret.sp_tx_buf;
 
-    dprintf(PB_DNONE, "[       TUN] Setting up tun interface with %s/%d... ", addr, mask);
+    dprintf(PB_DNONE, "[       TUN] Setting up tun interface with %s/%d... ", config->ipstr, config->netmask);
 
-    ret.tun_fd = tunif_open(addr, mask, _config.txqlen);
+    ret.tun_fd = tunif_open(config->ipstr, config->netmask, config->txqlen);
 
     dprintf(PB_DNONE, "done\n");
 
-    ret.sp_fd = sp_open(dev, params, SP_NONE);
+    if (config->tcp) {
 
-    if(ret.sp_fd != -1) {
-        dprintf(PB_DNONE, "[       SER] Opened %s\n",dev);
+        sread = tcp_read;
+        swrite = tcp_write;
+
+        ret.sp_fd = tcp_open(config->sdev, config->port);
+
+        if(ret.sp_fd != -1) {
+            dprintf(PB_DNONE, "[       SER] Opened TCP connection to %s:%d\n", config->sdev, config->port);
+        }
+
+    } else {
+
+        sread = sp_read;
+        swrite = sp_write;
+
+        /* serial port parameters */
+        sp_params params = {
+            .baudrate = config->baudrate,
+            .databits = 8,
+            .parity = SP_PARITY_NONE,
+            .stopbits = 1,
+            .flowcontrol = SP_FLOWCONTROL_NONE,
+            .minchars = 0,
+            .timeout = 0,
+            .canonical = 0
+        };
+
+        ret.sp_fd = sp_open(config->sdev, &params, SP_NONE);
+
+        if(ret.sp_fd != -1) {
+            dprintf(PB_DNONE, "[       SER] Opened %s\n", config->sdev);
+        }
+
     }
+    
+    if(ret.sp_fd > -1 ) {
 
-    dprintf(PB_DSTATE,"[       SER] Flushing buffer...");
-    for(int i = 0; i<10; i++) {
-        read(ret.sp_fd, buf, 1024);
+        dprintf(PB_DSTATE,"[       SER] Flushing buffer...");
+        for(int i = 0; i<10; i++) {
+            sread(ret.sp_fd, buf, 1024);
+        }
+
+        dprintf(PB_DSTATE, " done\n");
+
+        ret.timer_fd = timerfd_create(CLOCK_MONOTONIC, 0);
+
+        sp_setstate(&ret, PB_IDLE);
+
     }
-    dprintf(PB_DSTATE, " done\n");
-
-    ret.timer_fd = timerfd_create(CLOCK_MONOTONIC, 0);
-
-    sp_setstate(&ret, PB_IDLE);
 
     return ret;
 }
@@ -621,7 +667,7 @@ blockdone:
                     dprintf(PB_DSTATE, "[PBNET<-SER] Got SEP, end of packet\n");
                     dprintf(PB_DSTATS, "[PBNET<-SER] RX pkt #%d done, total o/h %d/%d (%.0f%%), took %.03f ms, %.0f Bps mean\n", pb->sp_rx_count + 1,
                             pb->sp_rx_oh, pb->sp_rx_plen,100.0*((pb->sp_rx_oh + 0.0) / pb->sp_rx_plen) ,  pktdur, bps);
-                    write(pb->sp_fd,&PBC_ACK,1);
+                    swrite(pb->sp_fd,(void*)&PBC_ACK,1);
                     dprintf(PB_DSTATE, "[PBNET->SER] ACK, end of packet\n");
                     dprintf(PB_DSTATE, "[PBNET->TUN] Forwarding %d-byte packet to host\n", pb->sp_rx_plen);
                     if(DBG_LV(PB_DBUF)) {
@@ -648,7 +694,10 @@ static void usage() {
     dprintf(PB_DNONE,"usage: "PROGNAME" [-d STRING ] [-b NUM] [-B NUM] [-l NUM]\n"\
                    "             [-a STRING ] [-m NUM] [-q NUM] [-D NUM]\n"\
                    "             [-o] [-u] [-f] [-h]\n\n"\
-                   "         -d: serial device to attach to (default:%s)\n"\
+                   "         -d: serial device to attach to (default:%s),\n"\
+                   "             or host / IPv4 address if -t specified\n"\
+                   "         -t: use TCP (-d host) instead of serial device\n"\
+                   "         -p: TCP port number (default: %d) if -t specified\n"\
                    "         -b: baud rate (300..9600, default:%d)\n"\
                    "         -B: block size (16..256, default:%d)\n"\
                    "         -l: serial TX per byte delay in microseconds\n"\
@@ -663,8 +712,8 @@ static void usage() {
                    "         -f: run in foreground\n"\
                    "         -h: this here help\n"\
                    "\n",
-                    _config.sdev, _config.baudrate,_config.blocksize,_config.delay,
-                    _config.ipstr,_config.netmask,_config.txqlen,PB_DMAX,_config.debuglevel
+                    _config.sdev, _config.port, _config.baudrate,_config.blocksize,_config.delay,
+                    _config.ipstr, _config.netmask, _config.txqlen, PB_DMAX, _config.debuglevel
     );
 
 }
@@ -673,7 +722,7 @@ static int parse_config(int argc, char ** argv) {
 
     int c, n;
 
-    while( (c=getopt(argc,argv, "oufhd:b:B:l:a:m:q:D:")) != -1) {
+    while( (c=getopt(argc,argv, "oufhd:b:B:l:a:m:q:D:tp:")) != -1) {
         switch(c) {
             case 'h': 
                         usage();
@@ -732,14 +781,23 @@ static int parse_config(int argc, char ** argv) {
                         }
                         _config.debuglevel = n;
                         break;
-
             case 'o':
                         _config.ckoffload = true;
                         break;
             case 'u':
                         _config.unreachables = true;
                         break;
-
+            case 't':
+                        _config.tcp = true;
+                        break;
+            case 'p':
+                        n = atoi(optarg);
+                        if(n < 0 || n > PORT_MAX) {
+                            dprintf(PB_DNONE,PROGNAME": TCP port number out of range (0..%d)\n", PORT_MAX);
+                            return -2;
+                        }
+                        _config.port = n;
+                        break;
             default:
                         dprintf(PB_DNONE,PROGNAME": try -h for list of options\n");
                         return -3;
@@ -761,27 +819,15 @@ int main (int argc, char **argv) {
     unsigned char sbuf[MTU+1];
     unsigned char nbuf[MTU+1];
 
-    _config.ipstr = def_ipstr;
     _config.sdev = def_sdev;
+    _config.ipstr = def_ipstr;
 
     if((ret=parse_config(argc, argv)) != 0) {
         return ret;
     }
 
-    /* serial port parameters */
-    sp_params params = {
-        .baudrate = _config.baudrate,
-        .databits = 8,
-        .parity = SP_PARITY_NONE,
-        .stopbits = 1,
-        .flowcontrol = SP_FLOWCONTROL_NONE,
-        .minchars = 0,
-        .timeout = 0,
-        .canonical = 0
-    };
-
     /* set up serial port and tun interface */
-    struct pbnet pb = pbnet_init(_config.sdev, &params, _config.ipstr, _config.netmask);
+    struct pbnet pb = pbnet_init(&_config);
 
     /* don't worry Bob, I'll fix these later (not) */
     if (pb.sp_fd== -1) {
@@ -790,7 +836,7 @@ int main (int argc, char **argv) {
     }
 
     if (pb.tun_fd == -1) {
-        dprintf(PB_DNONE, "[       ERR] Could not set up tunnel interface\n");
+        dprintf(PB_DNONE, "[       ERR] Could not set up tunnel interface. Are you root? Do you have CAP_NET_ADMIN?\n");
         return -1;
     }
 
@@ -834,7 +880,7 @@ int main (int argc, char **argv) {
 
         /* handle incoming data from PB */
         if(FD_ISSET(pb.sp_fd, &fds)) {
-            len = read(pb.sp_fd, sbuf, MTU);
+            len = sread(pb.sp_fd, sbuf, MTU);
             if(len < 0) continue;
             handle_sp(&pb, sbuf, len);
         }
