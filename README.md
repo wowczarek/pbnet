@@ -257,7 +257,7 @@ Both `net set ...` and `pbn_set()` methods accept the following keys / values:
 
 #### Host side
 
-Just run `pbnet -h` to see the available options and defaults. Using command line parameters you can configure the serial device, baud rate, block size, delay, IP address and netmask of the host side, etc. The default netmask is /24 rather than say /30 which makes more sense for a point to point interface, but this is mostly to test and demonstrate the PB discarding packets meant for other addresses on the same subnet. The default IP address on the host side is `10.99.99.1`.
+Just run `pbnet -h` to see the available options and defaults. Using command line parameters you can configure the serial device (or IP address/port of the emulator), baud rate, block size, per-byte delay (set to zero when connected to emulator), IP address and netmask of the host side, etc. The default netmask is /24 rather than say /30 which makes more sense for a point to point interface, but this is mostly to test and demonstrate the PB discarding packets meant for other addresses on the same subnet. The default IP address on the host side is `10.99.99.1`.
 
 ### Working with PBNET
 
@@ -427,13 +427,15 @@ Most PBNET calls return an error code. `E_OK = 0` is returned on success, negati
 | `E_ARG`   | -9    | Argument error |
 | `E_NOMINE`| -10   | Packet not for this socket. As seen with UDP: we are receiving from a specific host to a specific port, but a new "connection" arrived |
 
-`dns_resolve`, follow DNS RCODE on top of the above. The following ones are defined - others are still returned if they happen:
+`dns_resolve`, follows DNS RCODE on top of the above. The following ones are defined - others are still returned if they happen:
 
 ```pascal
 const
     { DNS return codes (RCODE) }
     de_formerr=1;de_servfail=2;de_nxdomain=3;de_notimp=4;de_refused=5;de_notzone=9;
 ```
+
+Internal error codes are negative, zero is `E_OK`, DNS RCODEs are positive, hence `shortint` signed type.
 
 The function `function strerr(e:shortint):string` can be used to convert error codes to strings.
 
