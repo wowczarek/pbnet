@@ -51,7 +51,7 @@ Table of contents
 - Emulated serial port via TCP to Piotr Piatek's PB-2000C emulator: done
 - Compiled library so far: 9.8kB. Still too much and no TCP yet, but more to be rewritten in asm.
 
-**Current state: library + `net.exe` tool: ICMP echo responder, DNS query, ping, configuration **
+Current state: library + `net.exe` tool - ICMP echo responder, DNS query, ping, configuration:
 
 **`CAL` -> `run net [ icmp | ns <host> | ping <host> [count] [size] [interval] | set < defaults | <key> <value> > ]`**
 
