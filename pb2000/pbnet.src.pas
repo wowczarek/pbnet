@@ -5,15 +5,10 @@
 unit pbnet;
 uses crt; { only for timerxxx functions }
 const 
-    { global settings }
-    cfg_file='pbnet.cfg';
-    def_baud='7'; { 9600 }
     { protocol properties }
-    pb_mtu=1500;
     pb_mcn=4; { max control character=number of reserved characters }
     pb_mc=pb_mcn-1; { mcn minus 1 (so we can use > not >=) }
     min_blsize=16; { minimum block size }
-    def_blsize=224; { block size }
     { control characters }
     pb_sep=0;
     pb_ack=1;
@@ -24,10 +19,8 @@ const
     { other internal constants }
     eph_min=49152; { lowest ephemeral port, IANA }
     eph_maxr=65535 - eph_min; { random count for ephemeral port }
-    def_ttl=64;
-    rs232_baddr=$08e2;
     timer_no=2;
-    kv_maxlen=127; { max key/value string length }
+    cfg_offset=17; { offset of config data from top of the dummy __settings proc }
 var 
     f:file; { serial port file descriptor }
     _init:boolean=false; { pbnet initialised }
@@ -39,26 +32,21 @@ var
     pbc_sep:byte=pb_sep;pbc_ack:byte=pb_ack;pbc_stx:byte=pb_stx;pbc_rtx:byte=pb_rtx;
     rs232_cnt:byte absolute $08e0; { # bytes in rs232 buffer }
     rs232_pos:byte absolute $08e1; { buffer write position }
-    rs232_buf:array [0..255] of byte absolute $08e2;
+    rs232_buf:array [0..255] of byte absolute $08e2; { rs232 buffer location }
     kbbuf_cnt:byte absolute $09ec; { # bytes in keyboard buffer }
-    baud:char=def_baud;
-    _ttl:byte=def_ttl;
-    my_ip:ipaddr=(10,99,99,2); { my own ip address }
-    dns_ip:ipaddr=(9,9,9,9); { Quad9 - sod Google }
-    search_domain:string='';
-    blsize:byte=def_blsize;
-    checksums:boolean=true;
     bsize:byte;
     { counters }
     ip_id:word=0;
-
-{ ======= Utility and config file related routines }
+    { default config - not exposed in the unit }
+    dcfg: ^pbn_cfg;
+{ ======= Utility routines }
 
 { strerror(errno) }
 function strerr(e:shortint): string;
 var se:string[8];
 begin
     case e of
+        e_nomine:   se:='E_NOMINE';
         e_arg:      se:='E_ARG';
         e_init:     se:='E_INIT';
         e_err:      se:='E_ERR';
@@ -80,44 +68,6 @@ begin
     strerr:=se;
 end;
 
-{ check if c is an alphanumeric character (or a hyphen, because DNS) }
-function alnum(c: char):boolean;
-begin
-    alnum:=false;
-    c:=upcase(c);
-    if (c in ['A'..'Z']) or (c in ['0'..'9']) or (c='-') then alnum:=true;
-end;
-
-{ trim [^a-Az-Z0-9-] from both ends of a string }
-function trim(var astr:string):string;
-var 
-  i,l,spos,epos,tl:byte;
-  r:string;
-  label st;
-  label en;
-begin
-  l:=length(astr);trim:=astr;
-  if (l<=0) or (l >= kv_maxlen) then exit;
-  { search ltr until an alnum character is found }
-  for i:=1 to l do begin
-    if alnum(astr[i]) then begin
-      spos:=i;goto st;
-    end;
-  end;
-  { none found:exit }
-  exit;
-  st:
-  { search rtl until an alnum character is found }
-  for i:=l downto 1 do begin
-    if alnum(astr[i]) then begin
-      epos:=i;goto en;
-    end;
-  end;
-  exit;
-  en:
-  { set string result to a substring spos...epos }
-  tl:=epos-spos+1;byte(r[0]):=tl;move(astr[spos],r[1],tl);trim:=r;
-end;
 { strtok_r: find next token in ts, separated with c, starting from position _pos, write token start(st) and length (tl), return false if no more tokens }
 function next_tok(var ts:string; c:char; var _pos:byte; var st:byte; var tl:byte):boolean;
 var p,l:byte;
@@ -131,14 +81,14 @@ begin
     next_tok:=true;
 end;
 
-{ parse an IP address from string into ipaddr - no range checks! returns 0 if all 4 octets parsed }
-function ipaddr_parse(var s:string;var a:ipaddr):byte;
+{ parse an IPv4 address from string into ipaddr - no range checks! returns true if all 4 octets parsed }
+function ipaddr_parse(var s:string;var a:ipaddr):boolean;
 var n,p,l:byte;
     p1:byte=1;
     os:string;
     i,j:byte;
 begin
-    ipaddr_parse:=1;
+    ipaddr_parse:=false;
     if not (length(s) in [7..15]) then exit; { shortest valid is 'n.n.n.n'=3+4*1=7, longest is 3+4*3=15 }
     i:=0;j:=0;
     while next_tok(s,'.',p1,p,l) and (l>0) and (i<4) do begin
@@ -146,132 +96,10 @@ begin
         val(os,a[j],n); if n=0 then inc(j) else exit;
         inc(i);
     end;
-    if j=4 then ipaddr_parse:=0;
+    if j=4 then ipaddr_parse:=true;
 end;
 
-{ process a key,value config entry }
-function parsekv(var k:string;var v:string): boolean;
-var tip:ipaddr;n,m:byte;emsg:string[30];c:char;w:word=0;
-label er;
-begin
-  parsekv:=true;
-  if k='ip' then begin
-    if ipaddr_parse(v,tip)>0 then begin
-         emsg:='could not parse';
-         goto er;
-    end;
-    my_ip:=tip;
-    exit;
-  end;
-  if k='dns' then begin
-    if ipaddr_parse(v,tip)>0 then begin
-        emsg:='could not parse';
-        goto er;
-    end;
-    dns_ip:=tip;
-    exit;
-  end;
-  if k='blsize' then begin
-    val(v,n,m);
-    if (m=0) and (n>=min_blsize) and (n<=def_blsize) then begin blsize:=n; exit; end
-    else begin
-        emsg:='outside range (16..224)';
-        goto er;
-    end;
-  end;
-  if k='checksums' then begin
-        c:=upcase(v[1]);
-        if (c='T') or (c='Y') then checksums:=true;
-        if (c='F') or (c='N') then checksums:=true;
-        exit;
-  end;
-  if k='baud' then begin
-        emsg:='unsupported value';
-        val(v,w,n);
-        if n > 0 then goto er;
-        case w of
-            9600:baud:='7';
-            4800:baud:='6';
-            2400:baud:='5';
-            1200:baud:='4';
-             600:baud:='3';
-             300:baud:='2';
-             150:baud:='1';
-              75:baud:='0';
-            else goto er;
-        end;
-
-        exit;
-  end;
-  if k='ttl' then begin
-    val(v,n,m);
-    if (m=0) and (n>0) then begin _ttl:=n; exit; end
-    else begin
-        emsg:='outside range (1..255)';
-        goto er;
-    end;
-  end;
-
-  if k='search' then search_domain:=v;
-
-  exit;
-er:
-  parsekv:=false;
-  writeln(cfg_file,': ',k,'=',v,': ',emsg);
-end;
-{ load config file and parse settings, returns false on failure }
-{ note: 'failure' is only a parse failure, the file does not need to exist }
-function readconfig:boolean;
-var
- i:byte=1;
- p:byte;
- lc:byte=1;
- f:text;
- s,k,v:string;
-label cont;
-label er;
-label en;
-begin
-  readconfig:=true;
-  assign(f,cfg_file);
-{ suppress I/O errors temporarily, so that the file not existing doesn't halt us }
-{$I-}
-  reset(f);
-{ restore halt on I/O errors}
-{$I+}
-  if ioresult<>0 then goto en;
-  { read file line by line }
-  while not eof(f) do begin
-    readln(f,s);
-    if ioresult<>0 then goto en;
-    repeat
-        if s[i]=';' then goto cont; {skip line (comment) if ; is the first non-alnum byte }
-        inc(i);
-    until alnum(s[i]) or (i=length(s));
-    s:=trim(s);
-    if s='' then goto cont; {skip empty lines}
-    if length(s)<3 then goto er;
-    { split into k,v on '=' }
-    p:=pos('=',s);
-    if p>kv_maxlen then goto er;
-    if p=0 then goto er;
-    k:=copy(s,0,p-1);v:=copy(s,p+1,kv_maxlen);
-    k:=trim(k);v:=trim(v);
-    if not parsekv(k,v) then goto er;
-  cont:
-    inc(lc);
-  end;
-  close(f);
-en:
-    exit;
-er:
-  writeln(cfg_file,': error in line ',lc);
-  readconfig:=false;
-  close(f);
-end;
-
-{ ========== other routines follow ======== }
-
+{ IPv4 address to string }
 function ipaddr_str(var a:ipaddr):string;
 var ips_r:string[15]='';
 ips_o:string[3];
@@ -284,6 +112,78 @@ begin
     end;
     ipaddr_str:=ips_r;
 end;
+
+{ process a key,value config entry }
+function pbn_set(sk: string; v: string):boolean;
+var tip:ipaddr;n:integer;m:byte;emsg:string[24];c:char;w:word=0;k:char;
+era:string[14]='outside range ';
+label er;
+begin
+  k:=sk[1];
+  pbn_set:=true;
+  emsg:='unsupported value';
+  case k of
+  'i': begin
+    if not ipaddr_parse(v,tip) then goto er;
+    cfg^.ip:=tip;
+  end;
+  'd': begin
+    if not ipaddr_parse(v,tip) then goto er;
+    cfg^.dns:=tip;
+  end;
+  'b': begin
+    val(v,n,m);
+    if (m=0) and (n>=min_blsize) and (n<=dcfg^.blsize) then cfg^.blsize:=n
+    else begin
+        emsg:=era+'(16..224)';
+        goto er;
+    end;
+  end;
+  'c': begin
+        c:=upcase(v[1]);
+        if c in ['T','Y'] then cfg^.csums:=true
+        else if c in ['F','N'] then cfg^.csums:=false
+        else goto er;
+  end;
+  'r': begin
+        if not (v[1] in ['0'..'7']) then goto er;
+        cfg^.baud := v[1];
+  end;
+  't': begin
+    val(v,n,m);
+    if (m=0) and (n>0) and (n<256) then cfg^.ttl:=n
+    else begin
+        emsg:=era+'(1..255)';
+        goto er;
+    end;
+  end;
+  's': begin
+        cfg^.search := copy(v,1,30);
+  end;
+  else begin emsg:='unknown setting'; goto er; end;
+end;
+
+exit;
+
+er:
+  pbn_set:=false;
+  writeln('pbn_set: ',k,'=',v,': ',emsg);
+end;
+
+{ this is a storage area for our settings, the included assembly }
+{ is simply a series of DBs with a jump around it - we write settings to this }
+procedure __settings;
+begin
+{$I settings.pas}
+end;
+
+{ set settings to defaults }
+procedure pbn_defaults;
+begin
+    move(dcfg^, cfg^, sizeof(pbn_cfg));
+end;
+
+{ ========== other routines follow ======== }
 
 { RFC1071 checksum, as used in IP header checksum, ICMP header checksum, UDP checksum, etc. }
 function pkt_checksum(var data:array of byte;pos:word;len:word):word;
@@ -318,19 +218,22 @@ begin
     if _init then blockwrite(f, pbc_rtx, 1); { resume transmission }
 end;
 
-
-{ send an IP packet down the pipe }
+{ send a raw IP packet down the pipe }
 function pkt_send(var pkt:ippkt;timeout:word):shortint;
 var
 left:word;
-plen:word=0;
+plen:integer=0;
 pos:word=0;
-n:byte;i:byte;
+n: char;
 label etmo; label eok;
 begin
     if not _init then begin;
         pkt_send:=e_init;
         exit;
+    end;
+    { do not allow sending to self or same source and destination }
+    if quad_eq(pkt.ip.dst, cfg^.ip) or quad_eq(pkt.ip.src,pkt.ip.dst) then begin
+        pkt_send:=e_arg; exit;
     end;
     pkt_send:=e_ok;
     { populate length fields and compute checksums }
@@ -347,10 +250,13 @@ begin
                 udp.csum:=0;
                 udp.len:=swap(plen);
             end;
+            else begin { what kind of sorcery is this?! }
+                plen := len - ip_hlen;
+            end;
         end;
-
-        left:=plen+ip_hlen;
-        if left>pb_mtu then begin
+        inc(plen, ip_hlen);
+        left:=word(plen);
+        if left>cfg^.mtu then begin
             pkt_send:=e_mtu;
             exit; { don't send a packet that's too large }
         end;
@@ -363,7 +269,7 @@ begin
     { encode and send block by block }
     while left>bsize do begin
         enc_block(pkt.data, _cmap,_wbuf,pos, bsize,_smap);
-        blockwrite(f,_wbuf,blsize);
+        blockwrite(f,_wbuf,cfg^.blsize);
         dec(left, bsize);
         inc(pos,  bsize);
     end;
@@ -379,9 +285,13 @@ begin
     repeat
         if (rs232_cnt>0) and (rs232_buf[rs232_pos-1]=pb_ack) then goto eok;
         if (timeout>0) and timerout(timer_no) then goto etmo;
-    until kbbuf_cnt<>0;
-    pkt_send:=e_intr;
-    exit;
+        if kbbuf_cnt<>0 then case readkey of
+            { consume next byte from a 2-byte keycode }
+            #0: n:=readkey;
+            { exit on BRK }
+            #3: begin pkt_send := e_intr; exit; end;
+        end;
+    until false;
 eok:
     blockread(f,_wbuf,1);
     exit;
@@ -392,12 +302,11 @@ end;
 { wait for an IP packet until one received or key pressed or timeout }
 function pkt_get(var pkt:ippkt;timeout:word):shortint;
 var
-c:byte;
-br:byte;
+c, br: byte;
+n: char;
 bpos:byte=0;
 plen:word=0;
 label have_pkt;
-label trunc;
 label tmout;
 label intr;
 begin
@@ -417,9 +326,9 @@ begin
             if (bpos=0) and (timeout>0) then timerstart(timer_no,timeout);
             inc(bpos,br);
             { assembled a full block or got SEP }
-            if (bpos=blsize) or (c=pb_sep) then begin
+            if (bpos=cfg^.blsize) or (c=pb_sep) then begin
                 if(bpos>0) then begin
-                    if (plen+bpos-pb_mcn)>pb_mtu then begin
+                    if (plen+bpos-pb_mcn)>cfg^.mtu then begin
                         pkt_get:=e_mtu;
                         exit;
                     end;
@@ -437,11 +346,16 @@ begin
             end;
         end;
         if (timeout>0) and timerout(timer_no) then goto tmout;
-        if (kbbuf_cnt<>0) then goto intr;
+        if kbbuf_cnt<>0 then case readkey of
+            { consume next byte from a 2-byte keycode }
+            #0: n:=readkey;
+            { exit on BRK }
+            #3: goto intr;
+        end;
     until false;
 have_pkt:
-    pkt_get:=e_unxp;
-    if not quad_eq(pkt.ip.dst, my_ip) then exit; { not for me }
+    pkt_get:=e_nomine;
+    if not quad_eq(pkt.ip.dst, cfg^.ip) then exit; { not for me }
     pkt_get:=e_ok;
     { update l4_len based on protocol }
     case pkt.ip.proto of
@@ -450,7 +364,6 @@ have_pkt:
         ipr_tcp :pkt.l4_len:=swap(pkt.ip.len)-(swap(pkt.tcp.doff) shl 2);
     end;
     if swap(pkt.ip.len)=pkt.len then exit;
-trunc:
     pkt_get:=e_trunc;
     exit;
 tmout:
@@ -467,7 +380,7 @@ begin
         ver_ihl:=$45; { ver 4, ihl 5 dwords }
         dscp_ecn:=0; { clear }
         fl_foff:=$0040; { set DF flag (swapped byte order) }
-        ttl:=_ttl;
+        ttl:=cfg^.ttl;
         id:=swap(ip_id);
     end;
     inc(ip_id);
@@ -492,7 +405,7 @@ begin
             if cs < swap(icmp.csum) then inc(cs);
             icmp.csum:=swap(cs);
             echo_respond:=pkt_send(pkt,timeout);
-        end else echo_respond:=e_unxp;
+        end else echo_respond:=e_nomine;
     end;
 end;
 
@@ -514,7 +427,7 @@ begin
     udp_respond:=pkt_send(pkt,timeout);
 end;
 
-{ wait for data on UDP socket }
+{ wait for data on UDP socket and bind it to the first packet if rport=any an }
 function udp_recv(var pkt:ippkt;var sock:socket;timeout:word):shortint;
 var res:shortint;
 begin
@@ -531,8 +444,12 @@ begin
         res:=echo_respond(pkt,timeout); { maybe it's an echo request }
         exit;
     end;
-    if (not quad_eq(sock.remote,addr_any)) and (not quad_eq(pkt.ip.src,sock.remote)) then exit; { not from the wanted host }
     if (sock.lport>port_any) and (sock.lport<>swap(pkt.udp.dport)) then exit; { not for the wanted port }
+    udp_recv:=e_nomine; { dst port ok, but not for this socket - application can check this and handle pkt differently }
+    if (not quad_eq(sock.dst,addr_any)) and (not quad_eq(pkt.ip.src,sock.dst)) then exit { not from the wanted host }
+    else sock.dst := pkt.ip.src; { bind this socket to the remote host }
+    if (sock.rport=port_any) then sock.rport := swap(pkt.udp.sport); { bind this socket to the remote source port }
+    if swap(pkt.udp.sport) <> sock.rport then exit; { not from the wanted port }
     udp_recv:=e_ok;
 end;
 
@@ -542,8 +459,8 @@ begin
     { 'prime' the packet with basic header fields }
     pkt_prime(pkt);
     { populate IP fields }
-    pkt.ip.src:=my_ip;
-    pkt.ip.dst:=sock.remote;
+    pkt.ip.src:=cfg^.ip;
+    pkt.ip.dst:=sock.dst;
     pkt.ip.proto:=ipr_udp;
     pkt.udp.dport:=swap(sock.rport);
     { if we don't have a source port, randomise it and assign it }
@@ -555,23 +472,18 @@ begin
 end;
 
 function tcp_connect(var pkt:ippkt;var sock:socket;timeout:word):shortint;
-
 begin
 end;
 
-
-{ clean up a hostname string and append search domain if no dots }
-function hname_cleanup(var shost:string): boolean;
-var i:byte;
+{ check a hostname string and append search domain if no dots }
+function hname_check(var shost:string): boolean;
+var i:byte; c:char;
 begin
-    hname_cleanup:=false;
+    hname_check:=false;
     if (length(shost)=0) or (shost='.') then exit;
-    shost:=trim(shost);
-    if length(shost)=0 then exit;
-    if pos('.',shost) = 0 then shost:=shost+'.'+search_domain;
-    if length(shost)=0 then exit;
-    for i:=1 to length(shost) do if not (alnum(shost[i]) or (shost[i]='.')) then exit;
-    hname_cleanup:=true;
+    if pos('.',shost) = 0 then shost:=shost+'.'+cfg^.search;
+    for i:=1 to length(shost) do if not (shost[i] in [ 'a'..'z','A'..'Z','0'..'9','-','.']) then exit;
+    hname_check:=true;
 end;
 { resolve shost into ip, using pkt packet }
 { note that we don't map any DNS structures, this all works on raw offsets, to save code }
@@ -594,10 +506,10 @@ label dosect;
 begin
     retries:=retr;
     { we don't support reverse lookups - if we got an IP, just parse that. Easy peasy. }
-    if ipaddr_parse(shost,rip)=0 then goto ezpz;
+    if ipaddr_parse(shost,rip) then goto ezpz;
     { too short or malformed }
     dns_resolve:=e_arg;
-    if not hname_cleanup(shost) then exit;
+    if not hname_check(shost) then exit;
     dns_resolve:=e_err;
 retry:
     { if you've done this once in your life, you'll remember 0x0c and the 0xc00c pointer forever :-) }
@@ -606,7 +518,7 @@ retry:
     { prepare the socket }
     sock.lport:=port_any;
     sock.rport:=53;
-    sock.remote:=dns_ip;
+    sock.dst:=cfg^.dns;
     { build the query }
     with pkt.udp do begin
     { part 1: populate DNS header }
@@ -646,9 +558,9 @@ retry:
         exit;
     end;
     { we do a separate run of retries for RX }
-    retries:=retr;
+    retries:=retr * 2;
 rxretry:
-    pkt_ready; { tell the host that we can receive stuff now }
+    pkt_ready; { tell the host we can receive stuff now }
     { wait for a response packet }
     res:=udp_recv(pkt,sock,timeout);
     { retry on error, unless e_intr, that always exits }
@@ -656,6 +568,7 @@ rxretry:
         dec(retries);
         goto rxretry;
     end;
+    if retries = 0 then res := e_tmo;
     if res <> e_ok then begin
         dns_resolve := res;
         exit;
@@ -735,17 +648,18 @@ function pbn_init:boolean;
 begin
     pbn_init:=false;
     { initialise, erm, things }
-    bsize:=blsize-pb_mcn;
+    bsize:=cfg^.blsize-pb_mcn;
     rxcnt:=0; txcnt:=0;
-    { load the config }
-    if not readconfig then exit;
-    assign(f,'COM:'+baud+'N81NNN.NN'); { open serial port }
+    assign(f,'COM:'+cfg^.baud+'N81NNN.NN'); { open serial port }
     rewrite(f,1);reset(f,1); { set 1-byte block size for reading and writing }
     randomize; { ooh, InfoSec! }
     ip_id:=random($FFFF); { ooh, fancy! }
     pbn_init:=true;
     _init:=true;
 end;
-
+{ main section }
 begin
+    { initialise settings to where they live }
+    cfg := pointer(word(&__settings) + cfg_offset);
+    dcfg := pointer(word(&__settings) + cfg_offset + sizeof(pbn_cfg));
 end.

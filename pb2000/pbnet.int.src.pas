@@ -5,8 +5,8 @@
 interface pbnet;
 const 
     { error constants }
-    e_ok=0;   e_tmo=-1;  e_intr=-2; e_trunc=-3; e_crc=-4;
-    e_mtu=-5; e_unxp=-6; e_err=-7;  e_init=-8; e_arg=-9;
+    e_ok=0; e_tmo=-1; e_intr=-2; e_trunc=-3; e_crc=-4;
+    e_mtu=-5; e_unxp=-6; e_err=-7; e_init=-8; e_arg=-9; e_nomine=-10;
     { IP protocol numbers }
     ipr_zero=0; ipr_icmp=1; ipr_udp =17; ipr_tcp =6;
     { header lengths }
@@ -30,7 +30,7 @@ type
         state:tcp_state; { state (for TCP) }
         lport:word; { local port:source port for PB->world, destination port for world->PB }
         rport:word; { remore port}
-        remote:ipaddr; { remote address }
+        dst:ipaddr; { remote address }
     end;
     { IPv4 header }
     ip_hdr=record
@@ -91,27 +91,42 @@ type
                     3:{ variant 4:TCP + payload    } (tcp:    tcp_hdr)
             )
     end;
+    { PBNET settings }
+    pbn_cfg = record
+        ip: ipaddr;
+        dns: ipaddr;
+        mtu: word;
+        ttl: byte;
+        blsize: byte;
+        csums: boolean;
+        baud: char;
+        search: string[30];
+    end;
+
 var 
     addr_any:ipaddr=(0,0,0,0); { INADDR_ANY }
     rxcnt:word; { RX/TX counters }
     txcnt:word;
-
+    cfg: ^pbn_cfg;
 { pbnet API }
-
 function  strerr(e:shortint): string;
-function  ipaddr_parse(var s:string;var a:ipaddr):byte;
+function  ipaddr_parse(var s:string;var a:ipaddr):boolean;
 function  ipaddr_str(var a:ipaddr):string;
 function  quad_eq(var qa:array of byte;var qb:array of byte): boolean;
 procedure pkt_hold;
 procedure pkt_ready;
-function  pkt_send(var pkt:ippkt;timeout:word):shortint;
+procedure pkt_prime(var pkt:ippkt);
 function  pkt_get(var pkt:ippkt;timeout:word):shortint;
+function  pkt_send(var pkt:ippkt;timeout:word):shortint;
 function  echo_respond(var pkt:ippkt; timeout:word):shortint;
 function  udp_recv(var pkt:ippkt;var sock:socket;timeout:word):shortint;
 function  udp_send(var pkt:ippkt;var sock:socket;timeout:word):shortint;
+function  udp_respond(var pkt:ippkt;timeout:word):shortint;
 function  tcp_connect(var pkt:ippkt;var sock:socket;timeout:word):shortint;
 function  dns_resolve(shost:string;var rip:ipaddr;var pkt:ippkt;timeout: word; retr: byte):shortint;
 procedure pbn_shutdown;
 function  pbn_init:boolean;
+function  pbn_set(sk: string; v: string):boolean;
+procedure pbn_defaults;
 
 end.
