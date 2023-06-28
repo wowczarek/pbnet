@@ -33,7 +33,7 @@ Table of contents
   * [Working with PBNET](#working-with-pbnet)
     + [API description (work in progress)](#api-description-work-in-progress)
       - [Structures (records) and data types](#structures-records--and-data-types)
-      - [Procedures and functions](#procedures-and-functions)
+      - [The PBNET API](#the-pbnet-api)
       - [Error codes](#error-codes)
     + [Program flow](#program-flow)
 - [FAQ](#faq)
@@ -392,7 +392,7 @@ var
 
 These are used to accept any remote source and any remote port. For example with UDP, if we set `sock.rport:=port_any` and `sock.remote:=addr_any` and pass this socket to `udp_recv`, it will accept the first UDP packet destined to our IP address and our `sock.lport`, and set `rport` and `remote` to the remote source port and IPv4 address, so from this point, further `udp_recv` calls will filter this and only this connection.
 
-#### PBNET API ####
+#### The PBNET API ####
 
 | Function / procedure | Usage |
 |----------------------|-------|
