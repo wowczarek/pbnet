@@ -9,14 +9,14 @@ x Make IP address configurable on either end
 x Add TCP support to connect to an emulated / remote serial port (depended on emulator supporting this)
 
 PB-2000C IP stack:
-- Reconsider config file and strerr to save space!
+x Reconsider config file and strerr to save space!
   ( will be done with: net set xxx, self-modifying the library to store config )
 - add timeout to pkt_send, host should somehow confirm packet receipt
 +/- - implement UI elements (local IP, blinking TX, RX, IC, UD, TC, counters, timeout, processing) 
 - x for errors
 - make pbnet linux host robust: send unreachables when PB not available. wait for ping using state machine, not loop
 - restart / keep restarting if usb unavailable
-- BRK, not any key, to stop
+x BRK, not any key, to stop
 x add timeout parameter to pkt_get
 - handle RX checksum checking, broken packets
 - handle unreachables, TTL, etc.
@@ -34,7 +34,7 @@ x decide where to store packet length
 - send unreachables when PB not reachable
 
 x implement UDP
-x implement DNS
+x implement DNS (IN A only)
 
 - implement TFTP
 
@@ -42,5 +42,5 @@ x implement DNS
 
 x create unit / library
 
-- write ping client / program
+x write ping client / program
 
