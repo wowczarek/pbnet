@@ -59,6 +59,7 @@ enc_bl.pas
 dec_bl.pas
 cksum.pas
 quad_eq.pas
+settings.pas
 
 # Binaries + compiled sources
 pbnet
