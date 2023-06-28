@@ -165,7 +165,6 @@ struct pbnet {
 };
 
 /* reader/writer abstraction to allow custom read / write code between serial and TCP */
-
 ssize_t (*sread)(int, void*, size_t);
 ssize_t (*swrite)(int, void*, size_t);
 
@@ -267,13 +266,11 @@ static int sp_xmit(int fd, void* buf, size_t len) {
     if(len == 1 || _config.delay == 0) {
         return swrite(fd, buf, len);
     } else {
-
         for(int i = 0; i < len; i++) {
             int ret = swrite(fd,buf++, 1);
             if(ret < 0) return ret;
             while (usleep(_config.delay) == EINTR) usleep(_config.delay);
         }
-
         return len;
     }
 
@@ -386,7 +383,6 @@ struct pbnet pbnet_init(struct pbnet_config *config) {
 
         sread = tcp_read;
         swrite = tcp_write;
-
         ret.sp_fd = tcp_open(config->sdev, config->port);
 
         if(ret.sp_fd != -1) {
@@ -701,7 +697,8 @@ static void usage() {
                    "         -b: baud rate (300..9600, default:%d)\n"\
                    "         -B: block size (16..256, default:%d)\n"\
                    "         -l: serial TX per byte delay in microseconds\n"\
-                   "             (0.., 1 ms = 1000, 0:send at once, default:%d)\n"\
+                   "             (0.., 1 ms = 1000, 0:send at once, default:%d),\n"\
+                   "             defaults to 0 when using a TCP connection\n"\
                    "         -a: IPv4 address on host side (default:%s)\n"\
                    "         -m: netmask (0..31, default:%d)\n"\
                    "         -q: TUN interface TX queue length (0..)\n"\
@@ -720,6 +717,7 @@ static void usage() {
 
 static int parse_config(int argc, char ** argv) {
 
+    bool had_delay = false;
     int c, n;
 
     while( (c=getopt(argc,argv, "oufhd:b:B:l:a:m:q:D:tp:")) != -1) {
@@ -753,6 +751,7 @@ static int parse_config(int argc, char ** argv) {
                             return -2;
                         }
                         _config.delay = n;
+                        had_delay = true;
                         break;
             case 'a':
                         _config.ipstr = optarg;
@@ -789,6 +788,7 @@ static int parse_config(int argc, char ** argv) {
                         break;
             case 't':
                         _config.tcp = true;
+                        if (!had_delay) _config.delay = 0;
                         break;
             case 'p':
                         n = atoi(optarg);
