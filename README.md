@@ -452,6 +452,7 @@ The function `function strerr(e:shortint):string` can be used to convert error c
 ##### Start with #####
 
 `var pkt: ippkt;` - you need a packet to work with.
+
 `pbn_init;` - will return true if opening the serial port succeeded. At this not much more happens than opening the serial port - we are not going to receive anything until we are ready.
 
 ##### If you want to transmit a raw IP packet #####
@@ -471,17 +472,25 @@ Then do whatever you wish with the packet. If it's a TCP, UDP or ICMP packet, se
 ##### If you want to send UDP to a host on a port the easy way #####
 
 `var sock: socket;` - declare a "socket" - it's really only a convenient holder for source/destination ports and addresses.
+
 `sock.dst := whatever;` - you can resolve a hostname into `sock.dst` or whatever, or set four octets manually, or initialise the whole `sock` in the `var` section.
+
 `sock.lport := whatever;` - set the source port to a value of your choice, or set zero to be assigned a random ephemeral port.
+
 `sock.rport := whatever;` - set your destination port.
+
 `udp_send(pkt,socket,timeout);` - send your packet. This will take care of the source/dest IP and port, but set `l4_len` to your payload length.
 
 ##### If you want to "listen" on a UDP socket #####
 
 `var sock: socket;` - declare a "socket" - it's really only a convenient holder for source/destination ports and addresses.
+
 `sock.dst := whatever;` - you can resolve a hostname into `sock.dst` or whatever, or set four octets manually, or initialise the whole `sock` in the `var` section.
+
 `sock.lport := whatever;` - set the listening port. If set to zero, the first UDP packet will be accepted and the socket will become bound to this conversation.
+
 `sock.rport := whatever;` - set it to zero to accept the first packet to your local port. When that happens, your socket is bound to this remote port and `udp_recv` will return `e_nomine` if it reached the right port on your end, but is part of a different conversation (another source address or port).
+
 `udp_recv(pkt,socket,timeout);` - receive next packet that fits the socket.
 
 ##### If you received an `ippkt` that you know is UDP and you want to bounce another one back to sender #####
