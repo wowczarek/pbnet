@@ -48,7 +48,7 @@ Table of contents
 - UDP sockets: done
 - DNS resolver (IN A only): done
 - Ping program - no IP stack is complete without one: done
-- Emulated serial port via TCP to Piotr Piatek's PB-2000C emulator: done
+- Emulated serial port via TCP to Piotr Piatek's PB-2000C emulator: done, see https://github.com/wowczarek/pb2000em
 - Compiled library so far: 9.8kB. Still too much and no TCP yet, but more to be rewritten in asm.
 
 Current state: library + `net.exe` tool - ICMP echo responder, DNS query, ping, configuration:
