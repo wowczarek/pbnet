@@ -13,6 +13,7 @@ Table of contents
   * [Can I try it?](#can-i-try-it)
   * [How did you even find this thing?](#how-did-you-even-find-this-thing)
 - [What does PBNET do?](#what-does-pbnet-do)
+- [What did it take to create PBNET?](#what-did-it-take-to-create-pbnet)
 - [How does it work?](#how-does-it-work)
   * [Framing over serial (IPBSP)](#framing-over-serial-ipbsp)
   * [State machine on the PB-2000 side](#state-machine-on-the-pb-2000-side)
@@ -104,16 +105,16 @@ The PB-2000 and me go a long way. When I was about seven or eight years old, a f
 
 I want to say it's an IP stack, but I can only say this with some caveats. It is a half-duplex, synchronous, bi-directional packet pusher. It is a library and some applications that together allow the PB-2000C to talk UDP and TCP to the Internet, resolve DNS names and send and respond to ICMP echo requests.
 
+## What did it take to create PBNET?
+
+Apart from having the hardware and DL-Pascal, not that much, but I developed lots of things in the process to make this work easier. I started in 2021 (I think), with hardware only and little debugging capabilities, because Piotr Piątek's PB-2000C emulator had no serial port support. Then I had to learn the HD61700 assembly and add DL-Pascal's `inline()` format to Blue's HD61700 assembler, get it to work in Linux and write a barebones preprocessor and minifier so .asm files can be compiled and included where needed from within a `Makefile` and comments are stripped from sources, and to write a simple file transfer script that delays bytes when sending over serial port. Copying data over serial is slow, and compilation is slow like a bastard on real hardware, so then then I added serial port support to Piotr's emulator and some remote control capabilities so I could compile easier. I am also working on a MD-100 FDD emulator that works as a file server right from a subdirectory in Linux, rather than on a disk image. Altogether I have a comfortable development environment now.
+
 ## How does it work?
 
 PBNET connects a Linux host (gateway, router, whatever) to the PB-2000 using its serial port, and allows it to exchange packets. The host side effectively handles framing and flow control ("Layer 2"), whereas the PB-2000 handles that, plus the actual IP packets. All of the processing is done entirely in the PB-2000, with the following exceptions:
 
 - IP, ICMP, UDP and TCP checksums can be (optionally!) offloaded to the host side. The algorithm is dead-simple, but it adds even more delay, so this can be taken care of by the host
 - If the PB-2000 is disconnected or otherwise unreachable, such as not running PBNET, the host can send ICMP unreachables on its behalf
-
-## What did it take to create this?
-
-Apart from having the hardware and DL-Pascal, not that much, but I developed lots of things in the process to make this work easier. I started in 2021 (I think), with hardware only and little debugging capabilities, because Piotr Piątek's PB-2000C emulator had no serial port support. Then I had to learn the HD61700 assembly and add DL-Pascal's `inline()` format to Blue's HD61700 assembler, get it to work in Linux and write a barebones preprocessor and minifier so .asm files can be compiled and included where needed from within a `Makefile` and comments are stripped from sources, and to write a simple file transfer script that delays bytes when sending over serial port. Copying data over serial is slow, and compilation is slow like a bastard on real hardware, so then then I added serial port support to Piotr's emulator and some remote control capabilities so I could compile easier. I am also working on a MD-100 FDD emulator that works as a file server right from a subdirectory in Linux, rather than on a disk image. Altogether I have a comfortable development environment now.
 
 ### Framing over serial (IPBSP)
 
