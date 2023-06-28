@@ -55,6 +55,10 @@ Current state: library + `net.exe` tool - ICMP echo responder, DNS query, ping, 
 
 **`CAL` -> `run net [ icmp | ns <host> | ping <host> [count] [size] [interval] | set < defaults | <key> <value> > ]`**
 
+YouTube demo:
+
+[![Casio PB-2000C PBNET demo - an "IP stack" in DL-Pascal](https://img.youtube.com/vi/5rbEQchEa5w/hqdefault.jpg)](https://www.youtube.com/watch?v=5rbEQchEa5w)
+
 #### Work notes
 
 DL-Pascal is great, but the machine code it produces is bloated, plus it's Pascal. Only way to reduce binary size is to write more in assembly:
