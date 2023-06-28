@@ -1,4 +1,4 @@
-### NOTE: Status of this project *is work in progress* and it is not yet fully usable ###
+### NOTE: This project is very much *work in progress* ###
 
 Table of contents
 -----------------
@@ -38,21 +38,20 @@ Table of contents
 - [FAQ](#faq)
 - [Acknowledgments](#acknowledgments)
 
-
-
 ## PROGRESS
 
 - Packet encoding and decoding: done
 - Rewritten enc_block, dec_block and pkt_checksum to ASM: done
 - Respond to ICMP echo: done
-- Configuration file support on PB-2000: done
+- Configuration file support on PB-2000C: rewritten to keep settings within the library file (it's RAM storage): done
 - UDP sockets: done
 - DNS resolver (IN A only): done
-- Compiled library so far: 10.5 kB. Still too much and no TCP yet, but more to be rewritten in asm. After removing config file processing, we gain 2k binary size!
-- Added emulated serial port via TCP to Piotr Piatek's PB-2000C emulator
+- Ping program - no IP stack is complete without one: done
+- Emulated serial port via TCP to Piotr Piatek's PB-2000C emulator: done
+- Compiled library so far: 9.8kB. Still too much and no TCP yet, but more to be rewritten in asm.
 
-**Current state: library build + net.exe tool: ICMP echo reply test (run with 'icmp' parameter) or DNS resolver test (run with 'ns <host>' parameter)**
-**CAL -> `run net [ icmp | ns <host> ]`**
+**Current state: library + `net.exe` tool: ICMP echo responder, DNS query, ping, configuration **
+**CAL -> `run net [ icmp | ns <host> | ping <host> [count] [size] [interval] | set < defaults | <key> <value> > ]`**
 
 #### Work notes
 
@@ -111,6 +110,10 @@ PBNET connects a Linux host (gateway, router, whatever) to the PB-2000 using its
 
 - IP, ICMP, UDP and TCP checksums can be (optionally!) offloaded to the host side. The algorithm is dead-simple, but it adds even more delay, so this can be taken care of by the host
 - If the PB-2000 is disconnected or otherwise unreachable, such as not running PBNET, the host can send ICMP unreachables on its behalf
+
+## What did it take to create this?
+
+Apart from having the hardware and DL-Pascal, not that much, but I developed lots of things in the process to make this work easier. I started in 2021 (I think), with hardware only and little debugging capabilities, because Piotr Piątek's PB-2000C emulator had no serial port support. Then I had to learn the HD61700 assembly and add DL-Pascal's `inline()` format to Blue's HD61700 assembler, get it to work in Linux and write a barebones preprocessor and minifier so .asm files can be compiled and included where needed from within a `Makefile` and comments are stripped from sources, and to write a simple file transfer script that delays bytes when sending over serial port. Copying data over serial is slow, and compilation is slow like a bastard on real hardware, so then then I added serial port support to Piotr's emulator and some remote control capabilities so I could compile easier. I am also working on a MD-100 FDD emulator that works as a file server right from a subdirectory in Linux, rather than on a disk image. Altogether I have a comfortable development environment now.
 
 ### Framing over serial (IPBSP)
 
@@ -225,7 +228,7 @@ PBNET supports (will support) ICMP, UDP and TCP, and has a very basic DNS resolv
 
 1. Download the source on a Linux host, type `make`. This will build the host daemon, `host/pbnet`, build the `hd61700` assembler, compile the assembly files, include inline code and build all the resulting sources into `./pb2000/build`.
 2. Copy files from `./pb2000/build` onto the PB-2000 however you like. There is a script included `pb2000/sendfile.sh` which cleans up Pascal sources and sends files to a serial device with optional speed limit in Bps (bytes per second), which translates to a per-byte delay. With an MD-100 or FA-7, you shouldn't need a speed limit or delay, but if you get  `Read Fault` while loading the file using MENU -> load -> rs232c, slow it down. *Note:* the `Read Fault`s I encountered were most likely due to a bug in my DL-Pascal pre-release.
-3. Go into CAL mode, type `do build.bat`. This will build the `PBNET.DLE` library, `PBNET.UNI` unit file and the `net.exe` tool. ***Warning:** `build.bat` cleans up the sources after the build, including removing itself.*
+3. Go into CAL mode, type `do build.bat`. This will build the `PBNET.DLE` library, `PBNET.UNI` unit file and the `net.exe` tool. ***Warning:** `build.bat` cleans up the sources after the build, including removing itself. If you want to leave the sources intact, run `do build.bat noclean`.*
 4. To compile anything against PBNET, both `PBNET.UNI` and `PBNET.DLE` are required, but once compiled, `PBNET.UNI` can be deleted.
 
 ***Note on filename case:** Like most humans, I prefer lower case. Although the `do` and `run` commands are not case sensitive, compiling and linking requires the unit files and library files to be ALL CAPS. This is why the libraries are all uppercase, but extra tools like `net.exe` are lowercase.*
@@ -238,21 +241,19 @@ The default settings are normally enough for stable operation and best performan
 
 The defaults are: baud rate 9600, block size 224, IP address `10.99.99.2` and DNS server `9.9.9.9` (https://quad9.net/). There is no gateway setting - this is a point to point link and the PB only has one possible route.
 
-To configure PBNET / change any defaults, create a new text file `pbnet.cfg`, which holds `key=value` settings, one per line, with optional comments starting with `;`. *Note: there must be a newline at the end, because the file is read with Pascal's `readln()` - without a newline, the last line will not be parsed.*
+To configure PBNET / change any defaults, use the `net.exe` tool with `run net set <key> <value>`, or `run net set defaults` to reset to defaults. The key and value are passed directly to the `pbn_set()` function, so the same can be done within your own program.
 
-The supported settings are:
-- `ip=<a.b.c.d>`: PB's IP address
-- `baud=<75..9600>`: baud rate, 9600 bps is the default
-- `dns=<e.f.g.h>`: IP address of the DNS resolver - only one
-- `blocksize=<16..224>`: best to leave at default value (224), also must match on the host side!
-- `ttl=<1..255>`: IP Time To Live (hop limit) set in packets generated by the PB. Default is 64
-- `checksums=<tTyYfFnN>`: enable or disable checksum calculation and validation on the PB, default is true. *[not implemented yet, we correct the ICMP checksum but set UDP checksum to 0]*
+Both `net set ...` and `pbn_set()` methods accept the following keys / values:
 
-**NOTE 1:** *If you are happy with the defaults, there is no need for `pbnet.cfg` to exist.*
+`ip <a.b.c.d>`: PB's IP address
+`rate <1..7>`: baud rate, corresponds to the baud rate code used throughout Casio HD61700 platforms, 1 = 75 bps, 7 = 9600 bps
+`dns <e.f.g.h>`: IP address of your DNS resolver - only one
+`blocksize <16..224>`: best to leave at default value (224), also must match on the host side!
+`ttl <1..255>`: IP Time To Live (hop limit) set in packets generated by the PB. Default is 128
+`checksums <tTyYfFnN>`: enable or disable checksum calculation and validation on the PB, default is true. *[not fully implemented yet, compute ICMP checksum but we set UDP checksum to 0]*
 
-**NOTE 2:** *The config file is parsed every time `pbn_init` is called, typically once in an application using PBNET, but this significantly contributes to startup delay*
-
-**NOTE 3:** *The config file parser takes up precious code space - it may need to be simplified to be less user-friendly, but more compact, such as a compiled unit with a set of constants*
+**Note 1:** *`pbn_set()` really looks for the first letter of the keys, so you can shorten them, this is also why baud rate is 'rate' not 'baud'.*
+**Note 2:** *Since the PB-2000C uses a RAM based filesystem, settings are store within the PBNET.DLE library. We store in a dummy procedure as DB assembly data, but we also store the defaults.*
 
 #### Host side
 
@@ -290,7 +291,7 @@ type
     end;
 ```
 
-This record is of a fixed size of 1500 bytes *total* (plus `len` and `l4_len` fields). Normally, only one `ippkt` variable is required for all operations. The `l4_len` field contains the payload length for the given protocol (ICMP, UDP, TCP) and is set automatically on packet receipt, and on transmission, this field is used to indicate the payload size we want to send with the given protocol.
+This record is of a fixed size of 1500 bytes *total* (plus `len` and `l4_len` fields). Normally, only one `ippkt` variable is required for all operations. The `l4_len` field contains the payload length for the given protocol (ICMP, UDP, TCP) and is set automatically on packet receipt, and on transmission, this field is used to indicate the payload size we want to send with the given protocol. A pointer to TCP payload will probably added and will be set according to data offset.
 
 **Protocol headers** are defined as follows:
 
@@ -384,25 +385,29 @@ var
 
 These are used to accept any remote source and any remote port. For example with UDP, if we set `sock.rport:=port_any` and `sock.remote:=addr_any` and pass this socket to `udp_recv`, it will accept the first UDP packet destined to our IP address and our `sock.lport`, and set `rport` and `remote` to the remote source port and IPv4 address, so from this point, further `udp_recv` calls will filter this and only this connection.
 
-##### Procedures and functions #####
+##### PBNET API #####
 
-| Function / procedure | 
-|----------------------|
-| `procedure pbn_shutdown;` |
-| `function  pbn_init:boolean;` |
-| `procedure pkt_hold;` |
-| `procedure pkt_ready;` |
-| `function  pkt_send(var pkt:ippkt;timeout:word):shortint;` |
-| `function  pkt_get(var pkt:ippkt;timeout:word):shortint;` |
-| `function  echo_respond(var pkt:ippkt; timeout:word):shortint;` |
-| `function  udp_recv(var pkt:ippkt;var sock:socket;timeout:word):shortint;` |
-| `function  udp_send(var pkt:ippkt;var sock:socket;timeout:word):shortint;` |
-| `function  tcp_connect(var pkt:ippkt;var sock:socket;timeout:word):shortint;` |
-| `function  dns_resolve(shost:string;var rip:ipaddr;var pkt:ippkt;timeout: word; retr: byte):shortint;` |
-| `function  strerr(e:shortint): string;` |
-| `function  ipaddr_parse(var s:string;var a:ipaddr):byte;` |
-| `function  ipaddr_str(var a:ipaddr):string;` |
-| `function  quad_eq(var qa:array of byte;var qb:array of byte): boolean;` |
+| Function / procedure | Usage |
+|----------------------|-------|
+| `function  strerr(e:shortint): string;` | Error code to string. |
+| `function  ipaddr_parse(var s:string;var a:ipaddr):boolean;` | Parse an IP address from string. False on failure. |
+| `function  ipaddr_str(var a:ipaddr):string;` | Convert an `ipaddr` to string. Always succeeds... |
+| `function  quad_eq(var qa:array of byte;var qb:array of byte): boolean;` | Returns true if two 4-byte sequences are equal (IPv4 addresses basically) |
+| `procedure pkt_hold;` | Instruct the host to stop forwarding packets. |
+| `procedure pkt_ready;` | Instruct the host to start forwarding packets. Call some receive function immediately after this. |
+| `procedure pkt_prime(var pkt:ippkt);` | Set IP version, ID and other basic fields. Necessary for a new packet - also increments IP ID on every call. |
+| `function  pkt_get(var pkt:ippkt;timeout:word):shortint;` | Grab the next incoming IP packet, whatever it is. |
+| `function  pkt_send(var pkt:ippkt;timeout:word):shortint;` | Transmit an IP packet. |
+| `function  echo_respond(var pkt:ippkt; timeout:word):shortint;` | Checks if `pkt` is an ICMP echo request and responds to it. |
+| `function  udp_recv(var pkt:ippkt;var sock:socket;timeout:word):shortint;` | Receives the next packet that fits the `sock` - see source or "Program flow" below for details |
+| `function  udp_send(var pkt:ippkt;var sock:socket;timeout:word):shortint;` | Sends a packet to what is in `sock`. Make sure to set `pkt.l4_len` to match your `pkt.udp.payload` - see "Program flow". |
+| `function  udp_respond(var pkt:ippkt;timeout:word):shortint;` | Bounce the `pkt` back to where it came from. |
+| `function  tcp_connect(var pkt:ippkt;var sock:socket;timeout:word):shortint;` | I've been hearing this chap Vint Cerf is working on this new protocol. I need to give him a call. Not implemented yet. |
+| `function  dns_resolve(shost:string;var rip:ipaddr;var pkt:ippkt;timeout: word; retr: byte):shortint;` | Ask your DNS server for  an IN A of `shost` and store results in `rip`. If `shost` is an IP address, no query is sent - we don't support in-addr.arpa. |
+| `procedure pbn_shutdown;` | `pkt_hold` followed by closing the serial port. |
+| `function  pbn_init:boolean;` | Open the serial port, set random IP ID and `randomize`. |
+| `function  pbn_set(sk: string; v: string):boolean;` | Set a setting programatically. See "Configuring" above. |
+| `procedure pbn_defaults;` | Set all settings to defaults. |
 
 ##### Error codes #####
 
@@ -420,6 +425,7 @@ Most PBNET calls return an error code. `E_OK = 0` is returned on success, negati
 | `E_ERR`   | -7    | Any other error |
 | `E_INIT`  | -8    | PBNET uninitialised |
 | `E_ARG`   | -9    | Argument error |
+| `E_NOMINE`| -10   | Packet not for this socket. As seen with UDP: we are receiving from a specific host to a specific port, but a new "connection" arrived |
 
 `dns_resolve`, follow DNS RCODE on top of the above. The following ones are defined - others are still returned if they happen:
 
@@ -431,15 +437,74 @@ const
 
 The function `function strerr(e:shortint):string` can be used to convert error codes to strings.
 
-#### Typical program flow ###
+#### Typical program flow ####
 
-[TODO]
+**Note:** neither the library nor the interface declare a single `ippkt` variable. The user application is meant to provide one, and we can happily work with a single instance of `ippkt`.
+
+Start with:
+
+`var pkt: ippkt;` - you need a packet to work with.
+`pbn_init;` - will return true if opening the serial port succeeded. At this not much more happens than opening the serial port - we are not going to receive anything until we are ready.
+
+If you want to transmit a raw IP packet:
+
+`pkt_prime(pkt);` - this will prime your packet with basic fields, and also increment the IP ID field. Unless you really care about distinct IP IDs, you can call this once.
+
+Then do whatever you wish with the packet. If it's a TCP, UDP or ICMP packet, set the `l4_len` field to your *payload* length. If it's a raw IP packet, set `l4_len` to zero and set `len` (*not `ip.len`*) to the correct total length (including the 20-byte IP header). Chances are you won't be doing too much of this, so in most cases, `l4_len` does it.
+
+`pkt_send(pkt, timeout);` - this will transmit your carefully crafted packet. If any L4 checksum is non-zero (TCP,UDP,ICMP), it will be computed for you. This still does not allow the host to send you packets just yet.
+
+If you want to receive a packet:
+
+`pkt_ready;` - this will send RTX to the host, telling it it can start transmitting anything that might have been queued up. You better try receiving something immediately after this.
+
+`pkt_get(pkt, timeout);` - this will grab the next incoming IP packet with which you are free to do as you wish. This will also call `pkt_hold` behind the scenes, so host will not forward anything again until you call `pkt_ready`.
+
+If you want to send UDP to a host on a port the easy way:
+
+`var sock: socket;` - declare a "socket" - it's really only a convenient holder for source/destination ports and addresses.
+`sock.dst := whatever;` - you can resolve a hostname into `sock.dst` or whatever, or set four octets manually, or initialise the whole `sock` in the `var` section.
+`sock.lport := whatever;` - set the source port to a value of your choice, or set zero to be assigned a random ephemeral port.
+`sock.rport := whatever;` - set your destination port.
+`udp_send(pkt,socket,timeout);` - send your packet. This will take care of the source/dest IP and port, but set `l4_len` to your payload length.
+
+If you want to "listen" on a UDP socket:
+
+`var sock: socket;` - declare a "socket" - it's really only a convenient holder for source/destination ports and addresses.
+`sock.dst := whatever;` - you can resolve a hostname into `sock.dst` or whatever, or set four octets manually, or initialise the whole `sock` in the `var` section.
+`sock.lport := whatever;` - set the listening port. If set to zero, the first UDP packet will be accepted and the socket will become bound to this conversation.
+`sock.rport := whatever;` - set it to zero to accept the first packet to your local port. When that happens, your socket is bound to this remote port and `udp_recv` will return `e_nomine` if it reached the right port on your end, but is part of a different conversation (another source address or port).
+`udp_recv(pkt,socket,timeout);` - receive next packet that fits the socket.
+
+If you received an `ippkt` that you know is UDP and you want to bounce another one back to sender:
+
+`udp_respond(pkt,timeout);` - populate `udp.payload` with whatever, set `l4_len` and this will swap the sources / destinations and send the packet. Ideal for a single-packet request/response.
+
+The above behaviour (binding remote addr/port) contradicts the connectionless nature of UDP. This is really meant for convenience, nothing else. With how limited we are, we will probably be handling one thing at once, and if we get `e_nomine` we may ignore it or return an error code in whatever protocol we are handling. This will not be an issue anymore if/when I decide to implement an array of sockets.
+
+*Note:* socket fields are stored in the native byte order, no need to swap.
+
+End with:
+
+`pbn_shutdown` - this will close the serial port and call `pkt_hold` before doing so.
+
+Things to remember:
+
+- Your IP packet variable is reused between different calls (well, unless you have lots of RAM - do you?), so make sure you set `l4_len` and anything else you want to set before sending a new one, because you are working with recycled data.
+- All timeouts are specified in DL-Pascal's timer units. Manual says they operate at an interval of "about" 10 Hz. It is more likely tied to the LCD periodic pulse that runs at 55 Hz, so I assume they are decremented every 5th run. I need to do some more decompiling to verify.
+- `pkt_send()` explicitly denies sending to our own address and sending packets with the same source and destination. Just saying.
 
 ## FAQ
+
+- **Q:** *Why DL-Pascal? Hardly anyone can access this thing!*
+- **A:** *Well, tough. Let's hope by the time this project is semi-complete, there will be some movement on that front. Pascal is a high-level language and allows one to design an actual API where it's trivial to write networked applications. It is also much easier to prototype things before or instead writing them in assembly. I stand by this decision, even if eventually this becomes asm-only.*
+
+- **Q:** *Why only a single `socket`?*
+- **A:** *It's all down to RAM. We could easily have an array of them and indicate which one received data. Can do, but later.*
 
 - **Q:** *I have everything connected and running, the host is receiving packets from the PB, but I am getting no response from the DNS server or any other Internet or LAN host other than the host connected to the PB - why?*
 - **A:** *PBNET forwards packets from your PB towards your host, but that is where it ends. The host needs to have IP forwarding enabled, your router must have a route to your PB via your host and if required, needs to allow NAT from your PB's IP address, or otherwise your host needs to NAT PB's address to its own. Configuring these things is up to you, the user.*
 
-### Acknowledgments
+## Acknowledgments
 
-Like pretty much every project relating to PB-1000 and PB-2000, I would like to thank Piotr Piatek (http://www.pisi.com.pl/piotr433/index.htm) for his insights into the hardware and help with testing. This man has created an amazing body of work around these platforms and he also developed FPGA/CPLD based hardware modules for serial communication and mass storage, replacing the bulky FA-7 or MD-100 - he also developed an emulator for the PB-2000 that I use for compiling PBNET without having to transfer the source back and forth. I would also like to thank Pascal a.k.a. Xerxes for pushing his pre-production DL-Pascal card to eBay one day, Juergen Keller for his help with accessing DL-Pascal 1.2 and Blue for the HD61700 cross-assembler (http://hd61700.yukimizake.net/)
+Like pretty much every project relating to PB-1000 and PB-2000C, I would like to thank Piotr Piatek (http://www.pisi.com.pl/piotr433/index.htm) for his insights into the hardware and help with testing. This man has created an amazing body of work around these platforms and he also developed FPGA/CPLD based hardware modules for serial communication and mass storage, replacing the bulky FA-7 or MD-100 - he also developed an emulator for the PB-2000 that I use for compiling PBNET without having to transfer the source back and forth. I would also like to thank Pascal a.k.a. Xerxes for pushing his pre-production DL-Pascal card to eBay one day, Juergen Keller for his help with accessing DL-Pascal 1.2 and Blue for the HD61700 cross-assembler (http://hd61700.yukimizake.net/)
