@@ -52,7 +52,8 @@ Table of contents
 - Compiled library so far: 9.8kB. Still too much and no TCP yet, but more to be rewritten in asm.
 
 **Current state: library + `net.exe` tool: ICMP echo responder, DNS query, ping, configuration **
-**CAL -> `run net [ icmp | ns <host> | ping <host> [count] [size] [interval] | set < defaults | <key> <value> > ]`**
+
+**`CAL` -> `run net [ icmp | ns <host> | ping <host> [count] [size] [interval] | set < defaults | <key> <value> > ]`**
 
 #### Work notes
 
