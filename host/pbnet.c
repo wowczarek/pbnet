@@ -27,12 +27,12 @@
 #define PORT_MAX 65535
 
 /* state timeouts */
-#define IDLE_TIMEOUT  2 /* ACK interval during INIT state */
-#define TX_TIMEOUT    5 /* ACK timeout while sending blocks */
-#define RX_TIMEOUT    5 /* Block RX timeout */
-#define DEAD_TIMEOUT  5 /* Error recovery timeout */
-#define READY_TIMEOUT 10 /* idle timeout (READY state) for periodic keeplaives */
-#define MAX_RETRIES 5  /* max consecutive idle retries to mark state DEAD */
+#define IDLE_TIMEOUT  2     /* ACK interval during INIT state */
+#define TX_TIMEOUT    5     /* ACK timeout while sending blocks */
+#define RX_TIMEOUT    5     /* Block RX timeout */
+#define DEAD_TIMEOUT  2     /* Error recovery timeout */
+#define READY_TIMEOUT 10    /* idle timeout (READY state) for periodic keepalives */
+#define MAX_RETRIES 5       /* max consecutive idle retries to mark state DEAD */
 
 /* dummy constants for V4/V6 */
 #define V4 4
@@ -51,7 +51,6 @@ enum {
 };
 
 #define PB_DMAX PB_DBUF
-
 
 /* configuration holder */
 struct pbnet_config {
@@ -167,6 +166,8 @@ struct pbnet {
 /* reader/writer abstraction to allow custom read / write code between serial and TCP */
 ssize_t (*sread)(int, void*, size_t);
 ssize_t (*swrite)(int, void*, size_t);
+/* health check */
+int (*scheck)(int);
 
 #define BOOLSTR(v) ((v)? "true" : "false")
 
@@ -333,8 +334,68 @@ static void sp_setstate(struct pbnet *pb, const int state) {
 
 }
 
+/* (re)initialise serial port */
+static void sp_init(const struct pbnet_config *config, struct pbnet *pb) {
+
+    close(pb->sp_fd);
+
+    if (config->tcp) {
+
+        sread = tcp_read;
+        swrite = tcp_write;
+        scheck = tcp_check;
+
+        dprintf(PB_DSTATE, "[       SER] Connecting to %s:%d...\n", config->sdev, config->port);
+
+        pb->sp_fd = tcp_open(config->sdev, config->port);
+
+        if(pb->sp_fd == -2) {
+            dprintf(PB_DNONE, "[       SER] Hostname lookup error for %s\n", config->sdev);
+        } else if(pb->sp_fd != -1) {
+            dprintf(PB_DNONE, "[       SER] Connected to %s:%d\n", config->sdev, config->port);
+        } else {
+            dprintf(PB_DSTATE, "[       SER] Could not connected to %s:%d: %s\n", config->sdev, config->port, strerror(errno));
+        }
+
+    } else {
+
+        sread = sp_read;
+        swrite = sp_write;
+        scheck = sp_check;
+
+        /* serial port parameters */
+        sp_params params = {
+            .baudrate = config->baudrate,
+            .databits = 8,
+            .parity = SP_PARITY_NONE,
+            .stopbits = 1,
+            .flowcontrol = SP_FLOWCONTROL_NONE,
+            .minchars = 0,
+            .timeout = 0,
+            .canonical = 0
+        };
+
+        pb->sp_fd = sp_open(config->sdev, &params, SP_NONE);
+
+        if(pb->sp_fd != -1) {
+            dprintf(PB_DNONE, "[       SER] Opened %s\n", config->sdev);
+        }
+
+    }
+
+}
+
 /* handle timer expiry */
 static void handle_timer(struct pbnet *pb) {
+
+    if(pb->sp_state != PB_DEAD) {
+        if (scheck(pb->sp_fd) < 0) {
+            dprintf(PB_DNONE, "[       SER] Serial link failure\n");
+            sp_setstate(pb, PB_DEAD);
+        } else {
+            dprintf(PB_DSTATE, "[       SER] Serial link healthy\n");
+        }
+    }
 
     switch(pb->sp_state) {
         case PB_WBLOCK:
@@ -359,13 +420,24 @@ static void handle_timer(struct pbnet *pb) {
                 pb->retries++;
                 dprintf(PB_DBUF, "[     STATE] IDLE timeout\n");
                 sp_setstate(pb, PB_IDLE);
+                break;
+        case PB_DEAD:
+                dprintf(PB_DSTATE, "[     STATE] DEAD: re-connecting serial port\n");
+                sp_init(&_config, pb);
+                if(pb->sp_fd != -1) {
+                    dprintf(PB_DSTATE, "[     STATE] DEAD: serial port connected\n");
+                    sp_setstate(pb, PB_IDLE);
+                } else {
+                    dprintf(PB_DSTATE, "[     STATE] DEAD: serial port still not connected\n");
+                    sp_setstate(pb, PB_DEAD);
+                }
+
     }
 
 }
 
-
 /* set up serial port, wait for initial ACK, set up TUN interface */
-struct pbnet pbnet_init(struct pbnet_config *config) {
+static struct pbnet pbnet_init(struct pbnet_config *config) {
 
     struct pbnet ret;
     char buf[1024];
@@ -379,41 +451,13 @@ struct pbnet pbnet_init(struct pbnet_config *config) {
 
     dprintf(PB_DNONE, "done\n");
 
-    if (config->tcp) {
+    dprintf(PB_DNONE,"[       SER] Waiting for serial port\n");
 
-        sread = tcp_read;
-        swrite = tcp_write;
-        ret.sp_fd = tcp_open(config->sdev, config->port);
+    do {
+        sp_init(config, &ret);
+        if(ret.sp_fd == -1) sleep(1);
+    } while (ret.sp_fd == -1);
 
-        if(ret.sp_fd != -1) {
-            dprintf(PB_DNONE, "[       SER] Opened TCP connection to %s:%d\n", config->sdev, config->port);
-        }
-
-    } else {
-
-        sread = sp_read;
-        swrite = sp_write;
-
-        /* serial port parameters */
-        sp_params params = {
-            .baudrate = config->baudrate,
-            .databits = 8,
-            .parity = SP_PARITY_NONE,
-            .stopbits = 1,
-            .flowcontrol = SP_FLOWCONTROL_NONE,
-            .minchars = 0,
-            .timeout = 0,
-            .canonical = 0
-        };
-
-        ret.sp_fd = sp_open(config->sdev, &params, SP_NONE);
-
-        if(ret.sp_fd != -1) {
-            dprintf(PB_DNONE, "[       SER] Opened %s\n", config->sdev);
-        }
-
-    }
-    
     if(ret.sp_fd > -1 ) {
 
         dprintf(PB_DSTATE,"[       SER] Flushing buffer...");
@@ -830,7 +874,7 @@ int main (int argc, char **argv) {
     struct pbnet pb = pbnet_init(&_config);
 
     /* don't worry Bob, I'll fix these later (not) */
-    if (pb.sp_fd== -1) {
+    if (pb.sp_fd < 0) {
         dprintf(PB_DNONE, "[       ERR] Could not set up serial port\n");
         return -1;
     }

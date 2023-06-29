@@ -212,3 +212,8 @@ ssize_t sp_read(int fd, void* buf, size_t len) {
 ssize_t sp_write(int fd, void* buf, size_t len) {
     return write(fd, buf, len);
 }
+
+/* dummy check for now */
+int sp_check(int fd) {
+    return 0;
+}

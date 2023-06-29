@@ -2,7 +2,7 @@ General:
 
 x Add explicit WBLOCK state (ends on rx SEP)
 x Implement timeouts (WBLOCK, WACK, WRTX) on host side
-- Implement error handling on host side (also TCP disconnects!)
++/- Implement error handling on host side (also TCP disconnects!). TCP reconnect implemented.
 - Implement timeouts and error handling on PB-2000 side (block timeout at least)
 x Implement debug flags / log levels
 x Make IP address configurable on either end
