@@ -93,7 +93,6 @@ end;
 label ex;
 { main() }
 begin
-    if not pbn_init then exit;
     if (paramcount<1) then begin
         writeln('usage: ',paramstr(0),' [ icmp | ns <hst> | ping <hst> [cnt] [sz] [ivl] | set < def | <k> <v> > ]');
         goto ex;
@@ -102,7 +101,8 @@ begin
     host := paramstr(1); c := upcase(host[1]);
     { do this once }
     if paramcount > 1 then host := paramstr(2);
-
+    { do not init PBNET unless we need it }
+    if (c <> 'S') and not(pbn_init) then exit;
     case c of
     'I': begin
         icmp_resp;
